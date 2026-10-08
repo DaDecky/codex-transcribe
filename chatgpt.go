@@ -28,11 +28,12 @@ type credentials struct {
 }
 
 type upstreamFailure struct {
-	status     int
-	code       string
-	kind       string
-	message    string
-	retryAfter string
+	status         int
+	code           string
+	kind           string
+	message        string
+	retryAfter     string
+	upstreamStatus int
 }
 
 func failure(status int, code, kind, message string) *upstreamFailure {
@@ -62,7 +63,7 @@ func loadCredentials(path string) (credentials, error) {
 	return auth, nil
 }
 
-func (p *proxy) recognize(ctx context.Context, audio io.Reader, header *multipart.FileHeader, language string) (string, *upstreamFailure) {
+func (p *proxy) recognize(ctx context.Context, audio io.Reader, header *multipart.FileHeader, language string) (text string, resultFailure *upstreamFailure) {
 	auth, err := loadCredentials(p.authFile)
 	if err != nil {
 		return "", failure(http.StatusServiceUnavailable, "codex_auth_unavailable", "authentication_error", "Cannot load ChatGPT credentials. Run codex login and check the configured auth file.")
@@ -96,6 +97,11 @@ func (p *proxy) recognize(ctx context.Context, audio io.Reader, header *multipar
 		return "", failure(http.StatusBadGateway, "upstream_unreachable", "server_error", "Cannot reach ChatGPT transcription.")
 	}
 	defer resp.Body.Close()
+	defer func() {
+		if resultFailure != nil {
+			resultFailure.upstreamStatus = resp.StatusCode
+		}
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", upstreamStatusFailure(resp)
 	}

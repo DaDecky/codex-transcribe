@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"syscall"
 	"time"
 )
+
+var version = "dev"
 
 func defaultAuthFile() (string, error) {
 	if path := os.Getenv("CODEX_TRANSCRIBE_AUTH_FILE"); path != "" {
@@ -42,17 +45,46 @@ func validateListen(addr, apiKey string) error {
 }
 
 func run() error {
-	authFile, err := defaultAuthFile()
-	if err != nil {
-		return fmt.Errorf("resolve Codex auth file: %w", err)
+	return runCLI(os.Args[1:], os.Stdout, os.Stderr)
+}
+
+func runCLI(args []string, stdout, stderr io.Writer) error {
+	doctor := len(args) > 0 && args[0] == "doctor"
+	if doctor {
+		args = args[1:]
 	}
-	listen := flag.String("listen", "127.0.0.1:8378", "HTTP listen address")
-	auth := flag.String("auth-file", authFile, "Codex ChatGPT auth.json path (read per request)")
-	timeout := flag.Duration("timeout", 90*time.Second, "upstream transcription timeout")
-	maxUpload := flag.Int64("max-upload-mib", 25, "maximum entire multipart request size in MiB")
-	flag.Parse()
-	if flag.NArg() != 0 {
+	flags := flag.NewFlagSet("codex-transcribe", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	listen := flags.String("listen", "127.0.0.1:8378", "HTTP listen address")
+	auth := flags.String("auth-file", "", "Codex ChatGPT auth.json path (default: CODEX_TRANSCRIBE_AUTH_FILE, CODEX_HOME/auth.json, or ~/.codex/auth.json; read per request)")
+	timeout := flags.Duration("timeout", 90*time.Second, "upstream transcription timeout")
+	maxUpload := flags.Int64("max-upload-mib", 25, "maximum entire multipart request size in MiB")
+	showVersion := flags.Bool("version", false, "print version and exit")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if flags.NArg() != 0 {
 		return errors.New("unexpected positional arguments; run codex-transcribe -help")
+	}
+	if *showVersion {
+		fmt.Fprintf(stdout, "codex-transcribe %s\n", version)
+		return nil
+	}
+	explicitAuth := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "auth-file" {
+			explicitAuth = true
+		}
+	})
+	if !explicitAuth {
+		var err error
+		*auth, err = defaultAuthFile()
+		if err != nil {
+			return fmt.Errorf("resolve Codex auth file: %w", err)
+		}
 	}
 	if *timeout <= 0 || *timeout > time.Hour {
 		return errors.New("timeout must be greater than zero and at most 1h")
@@ -61,6 +93,9 @@ func run() error {
 		return errors.New("max-upload-mib must be between 1 and 1024")
 	}
 	apiKey := os.Getenv("CODEX_TRANSCRIBE_API_KEY")
+	if doctor {
+		return runDoctor(*auth, *listen, apiKey, stdout)
+	}
 	if err := validateListen(*listen, apiKey); err != nil {
 		return err
 	}

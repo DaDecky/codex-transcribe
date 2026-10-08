@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      # Race instrumentation needs CGO on this native Linux amd64 runner.
+      # Run the suite and vet once, not in the architecture smoke matrix.
+      - name: Test with race detector
+        run: go test -race ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build four release archives and checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: bash scripts/release.sh "$RELEASE_TAG" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            runner: ubuntu-24.04
+            native: Linux/x86_64
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            native: Linux/aarch64
+          - os: darwin
+            arch: amd64
+            runner: macos-15-intel
+            native: Darwin/x86_64
+          - os: darwin
+            arch: arm64
+            runner: macos-15
+            native: Darwin/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+      # These runners are native for all four targets. Cross-compiling in the
+      # build job is NOT execution coverage. This smoke exercises CLI startup,
+      # help and the embedded version only, not authenticated transcription,
+      # all OS versions, macOS signing/notarization or desktop integrations.
+      - name: Verify checksums and smoke extracted native binary
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          TARGET_OS: ${{ matrix.os }}
+          TARGET_ARCH: ${{ matrix.arch }}
+          EXPECTED_NATIVE: ${{ matrix.native }}
+        run: |
+          set -euo pipefail
+          test "$(uname -s)/$(uname -m)" = "$EXPECTED_NATIVE"
+          cd dist
+          archive="codex-transcribe_${RELEASE_TAG}_${TARGET_OS}_${TARGET_ARCH}.tar.gz"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -c SHA256SUMS
+            sha256sum -c "$archive.sha256"
+          else
+            shasum -a 256 -c SHA256SUMS
+            shasum -a 256 -c "$archive.sha256"
+          fi
+          mkdir extracted
+          tar -xzf "$archive" -C extracted
+          test "$(extracted/codex-transcribe -version)" = "codex-transcribe $RELEASE_TAG"
+          extracted/codex-transcribe -help
+
+  publish:
+    needs: [build, smoke]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: dist
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/*.tar.gz dist/*.tar.gz.sha256 dist/SHA256SUMS \
+            --verify-tag --title "$RELEASE_TAG" --generate-notes

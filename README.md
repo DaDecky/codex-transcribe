@@ -4,40 +4,70 @@ A standalone Go HTTP proxy for ChatGPT dictation, authenticated with your existi
 
 **Unofficial integration:** this calls ChatGPT's private `/backend-api/transcribe` endpoint. It is not endorsed by OpenAI, may break without notice, and does not guarantee account eligibility, subscription coverage, or pricing. Use your own account and comply with the service's terms. Audio is uploaded to OpenAI.
 
-## Quick start
+## Quick start: no Go toolchain required
 
-Requires Go 1.24+ and a Codex ChatGPT login stored in an auth file. API-key-only Codex authentication is not sufficient.
+Linux and macOS binaries are available for x86-64 and ARM64. You need a [Codex ChatGPT login](https://developers.openai.com/codex/auth/), not an API-key-only login. The proxy uses its auth file; it does not perform login or refresh tokens itself.
+
+### 1. Download and verify
+
+In an empty working directory, select your platform and download the versioned archive and checksum:
 
 ```sh
-codex login
+version=v0.1.0
+case "$(uname -s)" in Linux) platform=linux ;; Darwin) platform=darwin ;; *) echo "Unsupported OS"; exit 1 ;; esac
+case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo "Unsupported architecture"; exit 1 ;; esac
+archive="codex-transcribe_${version}_${platform}_${arch}.tar.gz"
+base="https://github.com/DaDecky/codex-transcribe/releases/download/$version"
+curl -fLO "$base/$archive"
+curl -fLO "$base/$archive.sha256"
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum -c "$archive.sha256"
+else
+  shasum -a 256 -c "$archive.sha256"
+fi
+```
 
-git clone https://github.com/DaDecky/codex-transcribe.git
-cd codex-transcribe
-go build -o codex-transcribe .
+**Continue only if checksum verification succeeds.** Extract and inspect the version:
+
+```sh
+tar -xzf "$archive"
+./codex-transcribe -version
+```
+
+Checksums detect corrupted downloads; they are not signed provenance attestations. macOS binaries are not code-signed or notarized. If Gatekeeper blocks execution, review the source and release before approving it in your OS security settings; do not disable Gatekeeper globally.
+
+### 2. Check your setup, then start
+
+If you have not signed in to Codex, run `codex login` first. With the proxy stopped:
+
+```sh
+./codex-transcribe doctor
 ./codex-transcribe
 ```
 
-The listener defaults to `127.0.0.1:8378`. This repository is initially private; cloning requires GitHub access.
+`doctor` is offline: it checks token presence and whether the listener can bind. It does **not** prove that ChatGPT accepts the token. An occupied port is expected if you already have the proxy running. Keep the server terminal open; press Ctrl+C to stop it.
+
+### 3. Send a recording
+
+In another terminal, use a real audio path (not a placeholder). For example, if your WAV is saved in Music:
 
 ```sh
 curl --fail-with-body http://127.0.0.1:8378/v1/audio/transcriptions \
-  -F 'file=@recording.wav;type=audio/wav' \
-  -F 'language=en'
+  -F "file=@$HOME/Music/recording.wav;type=audio/wav" \
+  -F 'language=auto'
 ```
 
 ```json
 {"text":"Your transcribed speech."}
 ```
 
-For plain text:
+Add `-F 'response_format=text'` for plain text. This uploads the recording to ChatGPT. A 16 kHz mono PCM16 WAV is verified; direct Ogg/Opus failed in a reported request and remains [under investigation](https://github.com/DaDecky/codex-transcribe/issues/1). Conversion workaround (requires ffmpeg):
 
 ```sh
-curl --fail-with-body http://127.0.0.1:8378/v1/audio/transcriptions \
-  -F 'file=@recording.wav;type=audio/wav' \
-  -F 'response_format=text'
+ffmpeg -i "$HOME/Music/recording.opus" -ac 1 -ar 16000 -c:a pcm_s16le "$HOME/Music/recording.wav"
 ```
 
-The proxy does not record audio or paste text. Any HTTP client can use it. The buffered path was smoke-tested against ChatGPT with a public 16 kHz mono WAV speech sample, returning the recognized transcript in both JSON and plain text. Other audio formats depend on the private upstream endpoint and are not guaranteed by this project.
+For desktop dictation, follow the [Voxtype integration](docs/voxtype.md). Voxtype owns recording and text insertion; this proxy only transcribes. See the [real integration demo](docs/demo.md), [troubleshooting](#troubleshooting), and [configuration](#configuration).
 
 ## API
 
@@ -68,6 +98,13 @@ Successful JSON responses contain only `text`; private upstream metadata is not 
 ```
 
 `param` is included for field-specific errors and otherwise omitted. Clients should branch on `error.code`, not message wording.
+
+Upstream failures additionally include numeric `error.upstream_status` when an HTTP response was received. It is omitted for local validation, missing credentials, and transport failures without a response. For example, an upstream HTTP 503 is normalized to proxy HTTP 502:
+
+```json
+{"error":{"message":"ChatGPT transcription returned an unexpected HTTP status.","type":"server_error","code":"upstream_error","upstream_status":503}}
+```
+
 
 | HTTP status | Example codes | Meaning |
 | --- | --- | --- |
@@ -108,6 +145,9 @@ Returns `{"status":"ok"}`. This is a public process-liveness endpoint, **not** a
 
 Authentication is re-read for each request, so Codex token rotation is picked up without restarting the proxy. **Codex owns login and token refresh**; this proxy does not perform OAuth or write your credentials. If the upstream rejects the token, use Codex to refresh your login and try again. It does not read Codex provider configuration or redirect to a custom chat backend.
 
+`./codex-transcribe doctor -auth-file /path/to/auth.json -listen 127.0.0.1:8378` performs only local checks and exits nonzero if any check fails. `./codex-transcribe -version` prints the embedded version without requiring credentials.
+
+
 For authenticated local access:
 
 ```sh
@@ -136,6 +176,18 @@ Keep the listener on loopback unless you deliberately deploy it behind authentic
 - The proxy does not log audio, transcripts, bearer tokens, or raw upstream errors. OpenAI controls its own retention; this proxy does not impose a remote retention policy.
 - SIGINT/SIGTERM initiate graceful shutdown with a 10-second deadline.
 
+## Troubleshooting
+
+- **`doctor` cannot find/read credentials:** sign in with Codex, or select the correct file with `-auth-file`. Never paste auth-file contents into an issue.
+- **Port already occupied:** stop your existing proxy or choose another `-listen` port and update your client endpoint.
+- **`codex_auth_rejected`:** token presence does not imply validity. Let Codex refresh the login and retry; this proxy never rotates credentials itself.
+- **`upstream_forbidden`:** account access or the private endpoint/browser identity may have changed.
+- **`upstream_error`:** report `error.code`, `error.upstream_status`, proxy version, format, and duration. Do not attach private recordings, tokens, or raw auth data.
+- **`unsupported_parameter`:** the client sent an option outside our [API contract](#api). Disable it in the client; full OpenAI transcription compatibility is not claimed.
+- **Transcription succeeded but no text appeared:** that is a client clipboard/paste issue, separate from this proxy. See [Voxtype troubleshooting and rollback](docs/voxtype.md#troubleshooting-and-rollback).
+
+Background-service installers and the agent integration skill are tracked in [#7](https://github.com/DaDecky/codex-transcribe/issues/7) and [#6](https://github.com/DaDecky/codex-transcribe/issues/6); the documented foreground workflow works without either.
+
 ## Development
 
 ```sh
@@ -145,6 +197,17 @@ go build .
 ```
 
 Tests use local HTTP servers and temporary credentials; they do not contact ChatGPT or require a real account.
+
+Build from source with Go 1.24+:
+
+```sh
+git clone https://github.com/DaDecky/codex-transcribe.git
+cd codex-transcribe
+go build -o codex-transcribe .
+```
+
+Maintainers can package the same four release archives with `bash scripts/release.sh v0.1.0 dist`. Tagged `v*` releases run tests and native startup checks in GitHub Actions before publishing assets. A cross-compiled binary alone is not evidence of native execution or authenticated transcription on that platform.
+
 
 ## Acknowledgments
 

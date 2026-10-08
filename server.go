@@ -20,10 +20,11 @@ type proxy struct {
 }
 
 type apiError struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Code    string `json:"code"`
-	Param   string `json:"param,omitempty"`
+	Message        string `json:"message"`
+	Type           string `json:"type"`
+	Code           string `json:"code"`
+	Param          string `json:"param,omitempty"`
+	UpstreamStatus int    `json:"upstream_status,omitempty"`
 }
 
 func writeError(w http.ResponseWriter, status int, code, kind, message, param string) {
@@ -154,7 +155,9 @@ func (p *proxy) transcribe(w http.ResponseWriter, r *http.Request) {
 		if retryAfter := failure.retryAfter; retryAfter != "" {
 			w.Header().Set("Retry-After", retryAfter)
 		}
-		writeError(w, failure.status, failure.code, failure.kind, failure.message, "")
+		writeJSON(w, failure.status, struct {
+			Error apiError `json:"error"`
+		}{apiError{Message: failure.message, Type: failure.kind, Code: failure.code, UpstreamStatus: failure.upstreamStatus}})
 		return
 	}
 	if format == "text" {
