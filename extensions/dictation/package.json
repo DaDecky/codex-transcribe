@@ -1,0 +1,16 @@
+{
+  "name": "codex-transcribe-dictation",
+  "version": "0.1.0",
+  "description": "Review-before-send ChatGPT dictation for Oh My Pi, using codex-transcribe",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DaDecky/codex-transcribe.git",
+    "directory": "extensions/dictation"
+  },
+  "files": ["index.js", "audio.js", "README.md", "LICENSE"],
+  "omp": { "extensions": ["./index.js"] },
+  "scripts": { "test": "node --test" },
+  "engines": { "node": ">=22" }
+}

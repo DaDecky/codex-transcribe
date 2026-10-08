@@ -69,6 +69,18 @@ ffmpeg -i "$HOME/Music/recording.opus" -ac 1 -ar 16000 -c:a pcm_s16le "$HOME/Mus
 
 For desktop dictation, follow the [Voxtype integration](docs/voxtype.md). Voxtype owns recording and text insertion; this proxy only transcribes. See the [real integration demo](docs/demo.md), [troubleshooting](#troubleshooting), and [configuration](#configuration).
 
+## Native Oh My Pi dictation
+
+The optional [dictation extension](extensions/dictation/README.md) records speech and appends the transcript directly to Oh My Pi's composer. **Review/edit it and press Enter yourself; it never auto-sends.** The Go proxy remains a standalone backend.
+
+With the proxy running and this repository checked out:
+
+```sh
+omp install ./extensions/dictation
+```
+
+Restart omp, then use `/dictate` or Ctrl+Alt+D to start/stop; `/dictate cancel` discards pending dictation. Requires Linux, FFmpeg, and PulseAudio or PipeWire-Pulse. Verified with omp 18.8.6; upstream Pi and macOS extension support are not claimed. See the package guide for configuration, privacy, and uninstall instructions.
+
 ## API
 
 ### `POST /v1/audio/transcriptions`
