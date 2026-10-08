@@ -6,7 +6,7 @@ This is a capture of an **actual integration run**, not a product mockup. The te
 
 ## What was exercised
 
-1. A version-injected Linux x86-64 binary, extracted from the v0.1.0 release-format archive, served transcription on a local test port.
+1. A version-injected Linux x86-64 binary built with Go 1.27.1, extracted from a locally built v0.1.0 release-format archive, served transcription on a local test port. The GIF records that original run; the recommended download is now v0.1.1 because the GitHub-built v0.1.0 assets used a different Go runtime and failed authenticated first-use verification.
 2. Voxtype 1.1.0 recorded a public JFK speech sample through a dedicated virtual PipeWire/ALSA input. No microphone or unrelated desktop audio was recorded.
 3. Voxtype uploaded its captured WAV to the proxy, which used the existing Codex ChatGPT login to request transcription.
 4. Voxtype's built-in paste output inserted the real recognized transcript into the test field with Ctrl+Shift+V. Automatic submission was disabled.

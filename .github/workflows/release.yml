@@ -21,7 +21,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.27.1'
           cache: false
       # Race instrumentation needs CGO on this native Linux amd64 runner.
       # Run the suite and vet once, not in the architecture smoke matrix.

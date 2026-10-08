@@ -1,6 +1,6 @@
 # Voxtype integration
 
-Use [Voxtype](https://voxtype.io/) on Linux for recording, shortcuts, and text insertion. codex-transcribe provides only the HTTP transcription backend. This recipe was exercised with **Voxtype 1.1.0, codex-transcribe v0.1.0, Linux x86-64, PipeWire, and Hyprland/Wayland**. Other client versions and compositors are not verified here.
+Use [Voxtype](https://voxtype.io/) on Linux for recording, shortcuts, and text insertion. codex-transcribe provides only the HTTP transcription backend. The full capture/paste recipe was exercised with **Voxtype 1.1.0, codex-transcribe code tagged v0.1.0 built with Go 1.27.1, Linux x86-64, PipeWire, and Hyprland/Wayland**. Use the corrected v0.1.1 release, which aligns the release toolchain with that verification. Other client versions and compositors are not verified here.
 
 Audio is uploaded to ChatGPT through an unofficial private endpoint. A Codex ChatGPT login is required. Neither this recipe nor the proxy guarantees subscription coverage or account eligibility.
 

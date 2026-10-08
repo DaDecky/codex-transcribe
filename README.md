@@ -13,7 +13,7 @@ Linux and macOS binaries are available for x86-64 and ARM64. You need a [Codex C
 In an empty working directory, select your platform and download the versioned archive and checksum:
 
 ```sh
-version=v0.1.0
+version=v0.1.1
 case "$(uname -s)" in Linux) platform=linux ;; Darwin) platform=darwin ;; *) echo "Unsupported OS"; exit 1 ;; esac
 case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo "Unsupported architecture"; exit 1 ;; esac
 archive="codex-transcribe_${version}_${platform}_${arch}.tar.gz"
@@ -198,7 +198,7 @@ go build .
 
 Tests use local HTTP servers and temporary credentials; they do not contact ChatGPT or require a real account.
 
-Build from source with Go 1.24+:
+Build from source with Go 1.27.1 or newer. Go 1.27.1 is the authenticated-tested release toolchain; older Go 1.24-built assets returned upstream HTTP 403 in a same-host comparison. The exact upstream rejection mechanism is not established.
 
 ```sh
 git clone https://github.com/DaDecky/codex-transcribe.git
@@ -206,7 +206,7 @@ cd codex-transcribe
 go build -o codex-transcribe .
 ```
 
-Maintainers can package the same four release archives with `bash scripts/release.sh v0.1.0 dist`. Tagged `v*` releases run tests and native startup checks in GitHub Actions before publishing assets. A cross-compiled binary alone is not evidence of native execution or authenticated transcription on that platform.
+Maintainers can package the same four release archives with `bash scripts/release.sh v0.1.1 dist`. Tagged `v*` releases run tests and native startup checks in GitHub Actions before publishing assets. A cross-compiled binary alone is not evidence of native execution or authenticated transcription on that platform. Authenticate and transcribe a consented sample from the actual downloaded asset before recommending a new toolchain.
 
 
 ## Acknowledgments
