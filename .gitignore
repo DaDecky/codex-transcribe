@@ -1,0 +1,10 @@
+/codex-transcribe
+/codex-transcribe.exe
+/dist/
+.env
+.env.*
+auth.json
+*.wav
+*.flac
+*.mp3
+*.webm
