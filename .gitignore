@@ -8,5 +8,3 @@ auth.json
 *.flac
 *.mp3
 *.webm
-node_modules/
-*.tgz

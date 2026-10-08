@@ -71,15 +71,9 @@ For desktop dictation, follow the [Voxtype integration](docs/voxtype.md). Voxtyp
 
 ## Native Oh My Pi dictation
 
-The optional [dictation extension](extensions/dictation/README.md) records speech and appends the transcript directly to Oh My Pi's composer. **Review/edit it and press Enter yourself; it never auto-sends.** The Go proxy remains a standalone backend.
+Native recording and composer integration live in the separate [omp-dictation](https://github.com/DaDecky/omp-dictation) product. It manages this backend automatically; users do not need a second terminal. This repository stays focused on authentication, transcription, and the HTTP API.
 
-With the proxy running and this repository checked out:
-
-```sh
-omp install ./extensions/dictation
-```
-
-Restart omp, then use `/dictate` or Ctrl+Alt+D to start/stop; `/dictate cancel` discards pending dictation. Requires Linux, FFmpeg, and PulseAudio or PipeWire-Pulse. Verified with omp 18.8.6; upstream Pi and macOS extension support are not claimed. See the package guide for configuration, privacy, and uninstall instructions.
+The former `extensions/dictation` package has moved. Follow the new repository's installation/migration guide rather than installing an extension from this checkout.
 
 ## API
 
