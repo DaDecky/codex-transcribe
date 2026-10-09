@@ -67,7 +67,7 @@ Add `-F 'response_format=text'` for plain text. This uploads the recording to Ch
 ffmpeg -i "$HOME/Music/recording.opus" -ac 1 -ar 16000 -c:a pcm_s16le "$HOME/Music/recording.wav"
 ```
 
-For desktop dictation, follow the [Voxtype integration](docs/voxtype.md). Voxtype owns recording and text insertion; this proxy only transcribes. See the [real integration demo](docs/demo.md), [troubleshooting](#troubleshooting), and [configuration](#configuration).
+For desktop dictation, use the [Voxtype installer](docs/voxtype.md#automatic-installer-linux--systemd-user-service) to set up a verified binary and background service without a second terminal. Voxtype owns recording and text insertion; this proxy only transcribes. The [manual integration recipe](docs/voxtype.md#manual-setup), [real integration demo](docs/demo.md), [troubleshooting](#troubleshooting), and [configuration](#configuration) remain available.
 
 ## Native Oh My Pi dictation
 
@@ -192,7 +192,7 @@ Keep the listener on loopback unless you deliberately deploy it behind authentic
 - **`unsupported_parameter`:** the client sent an option outside our [API contract](#api). Disable it in the client; full OpenAI transcription compatibility is not claimed.
 - **Transcription succeeded but no text appeared:** that is a client clipboard/paste issue, separate from this proxy. See [Voxtype troubleshooting and rollback](docs/voxtype.md#troubleshooting-and-rollback).
 
-Background-service installers and the agent integration skill are tracked in [#7](https://github.com/DaDecky/codex-transcribe/issues/7) and [#6](https://github.com/DaDecky/codex-transcribe/issues/6); the documented foreground workflow works without either.
+Background-service setup for Voxtype is available through `python3 scripts/install-voxtype.py install`; see the [installation and rollback guide](docs/voxtype.md#automatic-installer-linux--systemd-user-service). The agent integration skill remains tracked in [#6](https://github.com/DaDecky/codex-transcribe/issues/6).
 
 ## Development
 

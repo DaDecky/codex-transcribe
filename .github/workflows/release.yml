@@ -29,6 +29,11 @@ jobs:
         run: go test -race ./...
       - name: Vet
         run: go vet ./...
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test Voxtype installation and rollback
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
       - name: Build four release archives and checksums
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -98,6 +103,8 @@ jobs:
           tar -xzf "$archive" -C extracted
           test "$(extracted/codex-transcribe -version)" = "codex-transcribe $RELEASE_TAG"
           extracted/codex-transcribe -help
+          test -f extracted/scripts/install-voxtype.py
+          test -f extracted/scripts/voxtype_config.py
 
   publish:
     needs: [build, smoke]

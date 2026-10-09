@@ -22,3 +22,13 @@ jobs:
         run: go vet ./...
       - name: Build
         run: go build .
+
+  voxtype-installer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test config preservation and installer rollback
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v

@@ -33,6 +33,8 @@ fi
 cd -- "$repo_dir"
 cp LICENSE README.md "$work_dir/"
 cp -R docs "$work_dir/"
+mkdir -p "$work_dir/scripts"
+cp scripts/install-voxtype.py scripts/voxtype_config.py "$work_dir/scripts/"
 archives=()
 for os in linux darwin; do
     for arch in amd64 arm64; do
@@ -41,7 +43,7 @@ for os in linux darwin; do
         CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
             -trimpath -ldflags "-s -w -X main.version=$version" \
             -o "$work_dir/codex-transcribe" .
-        tar -czf "$output_dir/$archive" -C "$work_dir" codex-transcribe LICENSE README.md docs
+        tar -czf "$output_dir/$archive" -C "$work_dir" codex-transcribe LICENSE README.md docs scripts
         archives+=("$archive")
     done
 done

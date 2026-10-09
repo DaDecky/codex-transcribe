@@ -4,6 +4,55 @@ Use [Voxtype](https://voxtype.io/) on Linux for recording, shortcuts, and text i
 
 Audio is uploaded to ChatGPT through an unofficial private endpoint. A Codex ChatGPT login is required. Neither this recipe nor the proxy guarantees subscription coverage or account eligibility.
 
+## Automatic installer: Linux + systemd user service
+
+With Voxtype already installed and your Codex ChatGPT account logged in (`codex login`), run:
+
+```sh
+git clone https://github.com/DaDecky/codex-transcribe.git
+cd codex-transcribe
+python3 scripts/install-voxtype.py install
+```
+
+Requires Python 3.11 or newer, Linux x86-64/ARM64, an existing Voxtype `config.toml` and `voxtype.service` user unit, and a working systemd user session. Set up your normal Voxtype recording/output first; this installer connects that existing client to the backend. No Go compiler, pip packages, root access, or separate proxy terminal. The installer downloads the pinned v0.1.1 backend from GitHub and verifies its published SHA-256 before executing/installing it. An offline credential check confirms readable token presence, not login validity or account access.
+
+The installer installs `~/.local/bin/codex-transcribe`, creates `codex-transcribe.service`, and adds a Voxtype dependency drop-in. It updates only the selected engine and remote-backend settings; existing language, microphone, local model, hotkeys, output mode, paste hook, and auto-submit preferences are preserved. It does not install Voxtype, change compositor shortcuts, record audio, configure paste, or refresh credentials. An existing active Voxtype service is restarted to load the configuration; an inactive daemon is not started automatically.
+
+Before restarting Voxtype, the installer verifies that its own backend process owns the configured loopback listener and passes a bounded health check. This is local readiness, not proof that ChatGPT accepts the login. The backend is enabled under the user manager's `default.target` so it does not depend on a specific compositor's graphical-session integration.
+
+The default loopback endpoint is `http://127.0.0.1:8378`. Use `--port 8377` or another free port if needed. An unrelated listener is never stopped. CLI flags in an existing Voxtype unit can override its config; conflicting overrides must be resolved before installation rather than silently discarded. Existing unrelated drop-ins remain intact.
+
+```sh
+python3 scripts/install-voxtype.py install --port 18378
+```
+
+Every installation prints a unique private backup directory. To roll back, pass that exact path:
+
+```sh
+python3 scripts/install-voxtype.py rollback /absolute/path/to/printed-backup-directory
+```
+
+Rollback restores the prior configuration, binary, installer-managed unit/drop-in, and recorded service state. It refuses to overwrite files edited after installation. Keep the backup private; it can contain existing client settings or local proxy keys. A failed installation attempts to restore the prior state and reports any recovery failure instead of claiming success.
+
+For offline preparation or isolated verification, `install --no-start` writes the files without changing the user manager. It still downloads/verifies the binary and checks local credentials. That mode does not enable/start/restart services; use the default install for the normal automatic setup. Standard `HOME`, `XDG_CONFIG_HOME`, and `XDG_STATE_HOME` select installation locations.
+
+Audio will be uploaded to OpenAI only when you subsequently dictate or explicitly transcribe a file. After setup, verify with a consented WAV or a safe input field using the steps below. Auto-submit is preserved, not forcibly disabled: inspect your existing output settings before testing.
+
+Inspect or stop/start the installed backend with:
+
+```sh
+systemctl --user status codex-transcribe.service
+journalctl --user -u codex-transcribe.service -n 30 --no-pager
+systemctl --user stop codex-transcribe.service
+systemctl --user start codex-transcribe.service
+```
+
+The backend logs no audio, transcripts, OAuth tokens, or raw upstream response bodies. Review local paths/account metadata before sharing diagnostics. Use installer rollback for removal/restoration rather than deleting the unit or binary by hand.
+
+## Manual setup
+
+The following foreground recipe remains available if you do not use the installer.
+
 ## 1. Start the proxy
 
 Follow the [download and checksum instructions](../README.md#quick-start-no-go-toolchain-required). With the proxy stopped, run:
@@ -88,6 +137,8 @@ First confirm that transcription succeeds. Then confirm the text appears in the 
 ## Observed verification
 
 The integration was exercised with both file transcription and real daemon capture. For the recorded demo, a public speech sample was played into an isolated virtual audio input; **no microphone was recorded**. Voxtype captured the sample, sent a 16 kHz mono WAV to the proxy, received the actual ChatGPT transcript, and pasted it into a terminal test field using its built-in paste mode. The inserted text was compared against the clipboard result. See the [demo and its limitations](demo.md).
+
+The installer was exercised separately on Linux x86-64 with an isolated home/config/state directory and uniquely named real systemd user units. It downloaded/checksummed the official v0.1.1 binary, passed offline doctor, installed and health-checked its own background process, and configured Voxtype 1.1.0. File transcription of the public JFK sample returned the real ChatGPT transcript in 1.24 seconds. Rollback restored the original config byte-for-byte, removed created binary/unit/drop-in files, and restored the prior enabled/active fixture-daemon state. The CLI `--no-start` install/rollback path was also exercised. Existing production services, microphone, clipboard, and paste hook were not used or changed by these installer checks. Full logout/login, ARM64 installer execution, and macOS installation are not verified; macOS is not supported by this optional installer.
 
 ## Troubleshooting and rollback
 

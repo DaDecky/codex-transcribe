@@ -8,3 +8,4 @@ auth.json
 *.flac
 *.mp3
 *.webm
+__pycache__/
