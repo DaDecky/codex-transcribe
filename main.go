@@ -17,6 +17,7 @@ import (
 )
 
 var version = "dev"
+var legacyAuthMode bool
 
 func defaultAuthFile() (string, error) {
 	if path := os.Getenv("CODEX_TRANSCRIBE_AUTH_FILE"); path != "" {
@@ -49,6 +50,9 @@ func run() error {
 }
 
 func runCLI(args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "auth" {
+		return authCommand(args)
+	}
 	doctor := len(args) > 0 && args[0] == "doctor"
 	if doctor {
 		args = args[1:]
@@ -56,6 +60,7 @@ func runCLI(args []string, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("codex-transcribe", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	listen := flags.String("listen", "127.0.0.1:8378", "HTTP listen address")
+	authMode := flags.String("auth-mode", "keyring", "credential source: keyring (standalone) or codex (legacy auth file)")
 	auth := flags.String("auth-file", "", "Codex ChatGPT auth.json path (default: CODEX_TRANSCRIBE_AUTH_FILE, CODEX_HOME/auth.json, or ~/.codex/auth.json; read per request)")
 	timeout := flags.Duration("timeout", 90*time.Second, "upstream transcription timeout")
 	maxUpload := flags.Int64("max-upload-mib", 25, "maximum entire multipart request size in MiB")
@@ -93,11 +98,27 @@ func runCLI(args []string, stdout, stderr io.Writer) error {
 		return errors.New("max-upload-mib must be between 1 and 1024")
 	}
 	apiKey := os.Getenv("CODEX_TRANSCRIBE_API_KEY")
+	if *authMode != "keyring" && *authMode != "codex" {
+		return errors.New("auth-mode must be keyring or codex")
+	}
+	legacyAuthMode = *authMode == "codex"
+	if doctor && !legacyAuthMode {
+		return runKeyringDoctor(*listen, apiKey, stdout)
+	}
 	if doctor {
 		return runDoctor(*auth, *listen, apiKey, stdout)
 	}
 	if err := validateListen(*listen, apiKey); err != nil {
 		return err
+	}
+	unlock, err := sessionLock()
+	if err != nil {
+		return errors.New("cannot initialize dashboard configuration")
+	}
+	_, err = readDashboardConfig()
+	unlock()
+	if err != nil {
+		return errors.New("cannot initialize dashboard configuration")
 	}
 	client := &http.Client{
 		Timeout: *timeout,
@@ -107,6 +128,8 @@ func runCLI(args []string, stdout, stderr io.Writer) error {
 	}
 	proxy := &proxy{
 		authFile:    *auth,
+		standalone:  !legacyAuthMode,
+		managedKeys: true,
 		apiKey:      apiKey,
 		maxUpload:   *maxUpload << 20,
 		upstreamURL: "https://chatgpt.com/backend-api/transcribe",

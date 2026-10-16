@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Accounts · Codex Dictate</title>
+<style>
+:root{color-scheme:dark;font:15px/1.5 system-ui,sans-serif;color:#e9e9ed;background:#111214}*{box-sizing:border-box}body{margin:0;padding:60px 24px}main{max-width:760px;margin:auto}header{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:26px}.brand{font-size:12px;color:#a4a6ad;letter-spacing:.12em;text-transform:uppercase}h1{font-size:29px;font-weight:600;letter-spacing:-1px;margin:5px 0}h2{font-size:16px;font-weight:500;margin:0 0 6px}p{margin:0;color:#9c9fa8}button,.button{font:inherit;border:1px solid #36383f;background:#23252a;color:#ededf1;border-radius:8px;padding:8px 13px;cursor:pointer;white-space:nowrap;text-decoration:none;display:inline-block}button:hover,.button:hover{background:#30333a}button:disabled{opacity:.5;cursor:not-allowed}.primary{background:#c9efd9;color:#132d1e;border-color:#c9efd9}.primary:hover{background:#ade4c4}.panel{border:1px solid #303238;background:#191a1e;border-radius:12px;overflow:hidden}.row{display:flex;align-items:center;gap:16px;padding:20px;border-bottom:1px solid #303238}.row:last-child{border-bottom:0}.avatar{border-radius:50%;width:39px;height:39px;display:grid;place-items:center;color:#a9d9bd;background:#293830;flex-shrink:0}.details{flex:1;min-width:0}.name{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}.meta{font-size:12px;color:#989ca6;margin-top:3px}.active{color:#b4e6c7}.actions,.controls{display:flex;gap:8px;flex-wrap:wrap}.subtle{color:#a6a9b1;background:transparent}.empty{padding:38px 24px;text-align:center}.empty b{display:block;font-weight:500;margin-bottom:5px}.note{font-size:12px;line-height:1.7;margin-top:18px;color:#858994}.status{font-size:13px;min-height:24px;margin:0 0 12px;color:#b9c6ed}.error{color:#ffb4ac!important}footer{font-size:12px;color:#666c78;margin-top:28px}.login,.test{padding:20px}.login{margin-bottom:20px}.login p,.test p{font-size:13px;margin-bottom:14px}.login input{width:100%;border:1px solid #36383f;background:#111214;color:#dedfe5;font:13px/1.5 system-ui;border-radius:7px;padding:10px;margin:9px 0 12px}.login label{font-size:12px;color:#a4a6ad;display:block;margin-top:15px}[hidden]{display:none!important}.test{margin-top:20px}.recording{color:#ffd0cc;border-color:#99544c;background:#502e2c}.test-status{font-size:12px;color:#a4a6ad;margin-top:12px;min-height:18px}.result{white-space:pre-wrap;overflow-wrap:anywhere;background:#111214;border:1px solid #303238;border-radius:8px;padding:14px;margin:12px 0 0;min-height:64px;font:14px/1.6 system-ui;color:#bfc2cb}audio{width:100%;height:36px;margin-top:14px}.endpoint{font:11px ui-monospace,monospace;color:#818794;margin-top:5px}.test-label{font-size:12px;color:#a4a6ad;margin-bottom:12px}@media(max-width:570px){body{padding:30px 16px}.row{flex-wrap:wrap;gap:10px}.actions{margin-left:49px}.brand{font-size:10px}header{align-items:flex-start}.primary{font-size:13px}}
+</style>
+<main>
+<header><div><div class="brand">Codex Dictate</div><h1>ChatGPT accounts</h1><p>Choose an account for dictation.</p></div><button class="primary" id="add">+ Add account</button></header>
+<div class="status" id="status" role="status" aria-live="polite"></div>
+<section class="panel login" id="login" hidden aria-label="ChatGPT login">
+<h2>Continue sign-in</h2><p>Open this link in any browser on this computer. Your account will appear here after sign-in.</p>
+<input id="login-link" aria-label="Sign-in link" readonly autocomplete="off">
+<div class="controls"><a class="button" id="open-login" target="_blank" rel="noreferrer noopener">Open sign-in</a><button id="copy-link">Copy link</button><button id="cancel-login" class="subtle">Cancel</button></div>
+<label for="callback">Redirect did not finish? Paste the full callback URL from your browser's address bar.</label>
+<input id="callback" type="text" placeholder="http://127.0.0.1:1455/auth/callback?..." autocomplete="off" spellcheck="false"><button id="submit-callback">Complete sign-in</button>
+</section>
+<section class="panel" id="list" aria-label="Saved accounts"><div class="empty">Loading accounts…</div></section>
+<section class="panel test" aria-label="API keys"><h2>API keys</h2><p>Use a separate key for each consumer. Keys authorize transcription with the active ChatGPT account.</p><form id="create-key" class="controls"><input id="key-name" aria-label="Consumer name" placeholder="Consumer name, e.g. My app" maxlength="80" required style="flex:1;min-width:140px;background:#111214;color:#eee;border:1px solid #36383f;border-radius:8px;padding:10px"><button id="create-key-button">Create key</button></form><div id="new-key" hidden><p style="margin:14px 0 6px">Copy this key now. It will not be shown again.</p><input id="key-value" aria-label="New API key" readonly autocomplete="off" spellcheck="false" style="width:100%;padding:10px;background:#111214;color:#eee;border:1px solid #36383f;border-radius:8px"><div class="controls" style="margin-top:8px"><button id="copy-key">Copy key</button><button id="dismiss-key" class="subtle">Done</button></div></div><div id="key-status" class="test-status" role="status"></div><div id="keys"></div><div class="endpoint">Authorization: Bearer &lt;your-key&gt; · POST /v1/audio/transcriptions</div></section>
+<section class="panel test" aria-label="Test dictation">
+<h2>Test dictation</h2><p>Record a short clip, listen back, then send it to ChatGPT for transcription.</p>
+<div class="test-label" id="test-account">Sign in to test an account.</div>
+<div class="controls"><button id="record" disabled>● Record</button><button class="primary" id="test" disabled>Test transcription</button></div>
+<audio id="playback" controls preload="metadata" hidden></audio>
+<div class="test-status" id="test-status" role="status" aria-live="polite">Microphone access starts only when you press Record. Maximum 60 seconds.</div>
+<pre class="result" id="result" aria-live="polite">Your transcript will appear here.</pre>
+<div class="endpoint">POST /v1/audio/transcriptions</div>
+</section>
+<p class="note">Tokens stay in your OS keyring and refresh automatically when used.<br>Experimental sign-in. The OpenAI page may identify the app as Codex.</p>
+<footer><button id="lock" class="subtle">Lock dashboard</button><br>Local dashboard · Credentials are never displayed in your browser</footer>
+</main>
+<script>
+const el=id=>document.getElementById(id);
+const list=el('list'),status=el('status'),add=el('add'),loginPanel=el('login'),callbackInput=el('callback'),linkInput=el('login-link');
+let busy=false,lastMessage='',loginURL='',loginID='',activeAccount=null;
+function message(text,error=false){status.textContent=text;status.classList.toggle('error',error)}
+async function request(data){const response=await fetch('/accounts/api',data?{method:'POST',headers:{'Content-Type':'application/json','X-Dictate-Request':'1'},body:JSON.stringify(data)}:{});if(response.status===401){location.replace('/accounts');throw Error('Dashboard locked')}const body=await response.json();if(!response.ok)throw Error(body.error||'Request failed');return body}
+function button(text,action,cls='subtle'){const b=document.createElement('button');b.textContent=text;b.className=cls;b.onclick=action;return b}
+async function mutate(data){busy=true;try{await request(data);message('Saved.');await refresh()}catch(e){message(e.message,true)}finally{busy=false}}
+async function refresh(){
+ try{
+  const data=await request();add.disabled=data.pending;loginPanel.hidden=!data.pending;loginURL=data.login_url||'';loginID=data.login_id||'';linkInput.value=loginURL;el('open-login').href=loginURL||'#';if(!data.pending)callbackInput.value='';
+  if(data.message!==lastMessage){lastMessage=data.message;message(data.message||'')}
+  if(data.legacy)message('The server is using the legacy Codex account file.',true);
+  activeAccount=data.accounts.find(a=>a.active)||null;updateTestButtons();list.replaceChildren();
+  if(!data.accounts.length){const empty=document.createElement('div');empty.className='empty';const title=document.createElement('b');title.textContent='No accounts yet';const detail=document.createElement('p');detail.textContent='Add an account and finish sign-in in your browser.';empty.append(title,detail);list.append(empty)}
+  for(const a of data.accounts){
+   const row=document.createElement('div');row.className='row';const avatar=document.createElement('div');avatar.className='avatar';avatar.textContent='G';const details=document.createElement('div');details.className='details';const name=document.createElement('span');name.className='name';name.textContent=a.label;const meta=document.createElement('div');meta.className='meta'+(a.active?' active':'');meta.textContent=(a.active?'● Active · ':'')+a.status;details.append(name,meta);const actions=document.createElement('div');actions.className='actions';
+   if(!a.active)actions.append(button('Use account',()=>mutate({action:'activate',id:a.id})));
+   actions.append(button('Rename',()=>{const label=prompt('Account name',a.label);if(label!==null)mutate({action:'rename',id:a.id,label})}));
+   actions.append(button('Remove',()=>{if(confirm('Remove this account from Dictate? This only clears local credentials. If active, the next saved account will be selected.'))mutate({action:'remove',id:a.id})}));
+   row.append(avatar,details,actions);list.append(row)
+  }
+ }catch(e){message(e.message,true)}
+}
+add.onclick=async()=>{add.disabled=true;try{await request({action:'login'});await refresh()}catch(e){message(e.message,true);await refresh()}};
+el('copy-link').onclick=async()=>{try{await navigator.clipboard.writeText(loginURL);message('Link copied. Open it in your preferred browser.')}catch(e){linkInput.focus();linkInput.select();message('Select the link above and copy it manually.')}};
+el('cancel-login').onclick=()=>mutate({action:'cancel-login',id:loginID});
+el('submit-callback').onclick=async()=>{const value=callbackInput.value.trim();if(!value){message('Paste the full callback URL first.',true);return}const b=el('submit-callback');b.disabled=true;busy=true;try{await request({action:'callback',callback:value});message('Callback received. Completing sign-in…')}catch(e){message(e.message,true)}finally{callbackInput.value='';b.disabled=false;busy=false}};
+
+const recordButton=el('record'),testButton=el('test'),playback=el('playback'),testStatus=el('test-status'),result=el('result');
+playback.addEventListener('error',()=>testMessage('Audio playback failed. Please record again or reload the dashboard.',true));
+let recorder=null,microphone=null,audioBlob=null,audioURL='',recording=false,preparing=false,uploading=false,recordTimer=null,recordStart=0;
+function testMessage(text,error=false){testStatus.textContent=text;testStatus.classList.toggle('error',error)}
+function updateTestButtons(){
+ recordButton.disabled=preparing||uploading||(!activeAccount&&!recording);
+ testButton.disabled=!audioBlob||recording||preparing||uploading||!activeAccount;
+ el('test-account').textContent=activeAccount?'Active account: '+activeAccount.label:'Sign in to test an account.';
+}
+function releaseMicrophone(){if(microphone){microphone.getTracks().forEach(track=>track.stop());microphone=null}clearInterval(recordTimer);recordTimer=null}
+function stopRecording(){if(recorder&&recorder.state==='recording'){recorder.stop();releaseMicrophone();recording=false;preparing=true;recordButton.textContent='● Record';recordButton.classList.remove('recording');testMessage('Preparing audio…');updateTestButtons()}}
+// Normalize the browser recording to mono PCM16 WAV at 16 kHz, matching the
+// format used by the desktop dictation client.
+async function asWAV(blob){
+ const context=new AudioContext();let decoded;
+ try{decoded=await context.decodeAudioData(await blob.arrayBuffer())}finally{await context.close()}
+ const offline=new OfflineAudioContext(1,Math.ceil(decoded.duration*16000),16000),source=offline.createBufferSource();source.buffer=decoded;source.connect(offline.destination);source.start();
+ const samples=(await offline.startRendering()).getChannelData(0),buffer=new ArrayBuffer(44+samples.length*2),view=new DataView(buffer);
+ const text=(offset,s)=>{for(let i=0;i<s.length;i++)view.setUint8(offset+i,s.charCodeAt(i))};
+ text(0,'RIFF');view.setUint32(4,36+samples.length*2,true);text(8,'WAVE');text(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,16000,true);view.setUint32(28,32000,true);view.setUint16(32,2,true);view.setUint16(34,16,true);text(36,'data');view.setUint32(40,samples.length*2,true);
+ for(let i=0;i<samples.length;i++){const s=Math.max(-1,Math.min(1,samples[i]));view.setInt16(44+i*2,s<0?s*32768:s*32767,true)}
+ return new Blob([buffer],{type:'audio/wav'});
+}
+recordButton.onclick=async()=>{
+ if(recording){stopRecording();return}
+ if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){testMessage('Audio recording is unavailable. Open this dashboard in a current browser on localhost.',true);return}
+ preparing=true;updateTestButtons();testMessage('Waiting for microphone permission…');
+ try{
+  microphone=await navigator.mediaDevices.getUserMedia({audio:true});
+  const chunks=[],preferred=['audio/webm;codecs=opus','audio/mp4'].find(type=>MediaRecorder.isTypeSupported(type));
+  recorder=preferred?new MediaRecorder(microphone,{mimeType:preferred}):new MediaRecorder(microphone);
+  recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+  recorder.onerror=()=>{releaseMicrophone();recording=false;preparing=false;recorder=null;recordButton.textContent='● Record';recordButton.classList.remove('recording');testMessage('Recording failed. Please try again.',true);updateTestButtons()};
+  recorder.onstop=async()=>{
+   releaseMicrophone();
+   try{
+    const blob=new Blob(chunks,{type:recorder.mimeType});if(!blob.size)throw Error('No audio was captured. Please try again.');audioBlob=await asWAV(blob);
+    if(audioURL)URL.revokeObjectURL(audioURL);audioURL=URL.createObjectURL(audioBlob);playback.src=audioURL;playback.load();playback.hidden=false;result.textContent='Listen to your clip, then click Test transcription.';testMessage('Recording ready. Audio is sent to OpenAI only when you click Test transcription.');
+   }catch(e){audioBlob=null;testMessage(e.message||'Could not prepare audio.',true)}finally{preparing=false;recording=false;updateTestButtons()}
+  };
+  audioBlob=null;playback.hidden=true;recorder.start();recording=true;preparing=false;recordStart=Date.now();recordButton.textContent='■ Stop';recordButton.classList.add('recording');testMessage('Recording · 0s');updateTestButtons();
+  recordTimer=setInterval(()=>{const seconds=Math.floor((Date.now()-recordStart)/1000);testMessage('Recording · '+seconds+'s');if(seconds>=60)stopRecording()},250);
+ }catch(e){releaseMicrophone();preparing=false;testMessage(e.name==='NotAllowedError'?'Microphone permission denied. Allow microphone access in your browser and try again.':e.name==='NotFoundError'?'No microphone found. Connect one and try again.':(e.message||'Could not start recording.'),true);updateTestButtons()}
+};
+testButton.onclick=async()=>{
+ if(!audioBlob||!activeAccount)return;
+ uploading=true;updateTestButtons();result.textContent='Transcribing…';testMessage('Sending audio using '+activeAccount.label+'…');
+ const form=new FormData();form.append('file',audioBlob,'dictate-test.wav');form.append('model','whisper-1');
+ const start=performance.now(),controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),120000);
+ try{
+  const response=await fetch('/accounts/transcriptions',{method:'POST',headers:{'X-Dictate-Request':'1'},body:form,signal:controller.signal}),body=await response.json(),elapsed=((performance.now()-start)/1000).toFixed(1);
+  if(!response.ok){const error=body.error||{};result.textContent=error.message||'Transcription failed.';testMessage('HTTP '+response.status+(error.upstream_status?' · Upstream '+error.upstream_status:'')+' · '+(error.code||'request_failed')+' · '+elapsed+'s',true);return}
+  result.textContent=body.text||'(No speech detected)';testMessage('HTTP '+response.status+' · '+elapsed+'s · Transcription completed.');
+ }catch(e){result.textContent='No transcript returned.';testMessage(e.name==='AbortError'?'The test timed out after 120 seconds. Try a shorter clip.':'Could not reach the transcription service. '+e.message,true)}finally{clearTimeout(timeout);uploading=false;updateTestButtons()}
+};
+window.addEventListener('pagehide',()=>{releaseMicrophone();if(audioURL)URL.revokeObjectURL(audioURL)});
+async function keysRequest(data){const r=await fetch('/accounts/keys',data?{method:'POST',headers:{'Content-Type':'application/json','X-Dictate-Request':'1'},body:JSON.stringify(data)}:{});if(r.status===401){location.replace('/accounts');throw Error('Dashboard locked')}const d=await r.json();if(!r.ok)throw Error(d.error||'Request failed');return d}
+async function refreshKeys(){try{const data=await keysRequest();const container=el('keys');container.replaceChildren();if(!data.keys.length){const p=document.createElement('p');p.textContent='No API keys yet.';p.style.marginTop='14px';container.append(p)}for(const key of data.keys){const row=document.createElement('div');row.className='row';const details=document.createElement('div');details.className='details';const name=document.createElement('div');name.textContent=key.name;const meta=document.createElement('div');meta.className='meta';meta.textContent=key.prefix+'… · '+new Date(key.created_at).toLocaleDateString();details.append(name,meta);row.append(details,button('Revoke',async()=>{if(!confirm('Revoke '+key.name+'? Consumers using this key will stop working.'))return;try{await keysRequest({action:'revoke',id:key.id});el('key-status').textContent='Key revoked.';await refreshKeys()}catch(e){el('key-status').textContent=e.message}}));container.append(row)}}catch(e){el('key-status').textContent=e.message}}
+el('create-key').onsubmit=async e=>{e.preventDefault();if(!el('new-key').hidden){el('key-status').textContent='Copy or dismiss the current key before creating another.';return}el('create-key-button').disabled=true;try{const data=await keysRequest({action:'create',name:el('key-name').value});el('key-value').value=data.key;el('new-key').hidden=false;el('key-name').value='';el('key-status').textContent='Key created. Keep it private.';await refreshKeys()}catch(e){el('key-status').textContent=e.message}finally{el('create-key-button').disabled=false}};
+el('copy-key').onclick=async()=>{try{await navigator.clipboard.writeText(el('key-value').value);el('key-status').textContent='Key copied.'}catch(e){el('key-value').focus();el('key-value').select();el('key-status').textContent='Select and copy the key manually.'}};
+el('dismiss-key').onclick=()=>{el('key-value').value='';el('new-key').hidden=true;el('key-status').textContent=''};
+refreshKeys();
+el('lock').onclick=async()=>{try{const r=await fetch('/accounts/auth',{method:'POST',headers:{'Content-Type':'application/json','X-Dictate-Request':'1'},body:JSON.stringify({action:'logout'})});if(!r.ok)throw Error('Could not lock dashboard');location.replace('/accounts')}catch(e){message(e.message,true)}};
+refresh();setInterval(()=>{if(!busy)refresh()},4000);
+</script></html>

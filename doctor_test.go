@@ -111,7 +111,7 @@ func TestDoctorAuthPrecedence(t *testing.T) {
 			if err := os.WriteFile(tc.want, []byte(`{"tokens":{"access_token":"token"}}`), 0600); err != nil {
 				t.Fatal(err)
 			}
-			args := []string{"doctor", "-listen", "127.0.0.1:0"}
+			args := []string{"doctor", "-auth-mode", "codex", "-listen", "127.0.0.1:0"}
 			if tc.explicit != "" {
 				args = append(args, "-auth-file", tc.explicit)
 			}

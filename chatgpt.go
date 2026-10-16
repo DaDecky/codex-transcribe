@@ -64,8 +64,17 @@ func loadCredentials(path string) (credentials, error) {
 }
 
 func (p *proxy) recognize(ctx context.Context, audio io.Reader, header *multipart.FileHeader, language string) (text string, resultFailure *upstreamFailure) {
-	auth, err := loadCredentials(p.authFile)
+	var auth credentials
+	var err error
+	if p.standalone {
+		auth.Tokens.AccessToken, auth.Tokens.AccountID, err = loadAuth()
+	} else {
+		auth, err = loadCredentials(p.authFile)
+	}
 	if err != nil {
+		if p.standalone {
+			return "", failure(http.StatusServiceUnavailable, "dictate_auth_unavailable", "authentication_error", "Cannot load or renew Dictate credentials. Open /accounts and check your desktop keyring or sign in again.")
+		}
 		return "", failure(http.StatusServiceUnavailable, "codex_auth_unavailable", "authentication_error", "Cannot load ChatGPT credentials. Run codex login and check the configured auth file.")
 	}
 	reader, writer := io.Pipe()
@@ -103,7 +112,11 @@ func (p *proxy) recognize(ctx context.Context, audio io.Reader, header *multipar
 		}
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", upstreamStatusFailure(resp)
+		f := upstreamStatusFailure(resp)
+		if p.standalone && resp.StatusCode == http.StatusUnauthorized {
+			f.message = "ChatGPT rejected this account session. Sign in again from the accounts dashboard."
+		}
+		return "", f
 	}
 	if uploadErr != nil {
 		return "", failure(http.StatusBadGateway, "upstream_upload_failed", "server_error", "Cannot complete the audio upload to ChatGPT.")

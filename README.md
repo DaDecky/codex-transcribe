@@ -1,5 +1,123 @@
 # codex-transcribe
 
+## Consumer API keys
+
+In the unlocked dashboard, use **API keys → Create key**, naming the consumer.
+Copy the `sk-dictate-…` value before dismissing it: it is shown once and is never
+stored as plaintext on the server. The list shows only the name, prefix, and
+creation date. **Revoke** immediately prevents new requests with that key on
+all processes sharing the config. An already-authorized request can finish.
+Keys are persisted as SHA-256 hashes in the protected dashboard config. They
+use 256 bits of generated randomness, remain valid until revoked, and authorize
+transcription using the currently active ChatGPT account (not a fixed account).
+
+All server modes require a valid Bearer key for the consumer endpoint:
+
+```sh
+curl http://127.0.0.1:8377/v1/audio/transcriptions \
+  -H "Authorization: Bearer $DICTATE_API_KEY" \
+  -F file=@recording.wav -F model=whisper-1
+```
+
+The base URL for compatible clients is `http://127.0.0.1:8377/v1`. These are
+local Dictate keys, not OpenAI Platform keys. A missing/invalid/revoked key
+returns an OpenAI-shaped HTTP 401 error. Revoking all managed keys keeps the
+endpoint locked. The existing `CODEX_TRANSCRIBE_API_KEY`, when configured,
+remains an additional consumer key; it cannot be revoked from the dashboard.
+
+Dashboard recording tests use a separate, password-session-protected local
+route (`/accounts/transcriptions`) and need no consumer key in the browser.
+Neither API keys nor dashboard cookies can substitute for the other. Health
+checks remain public. Existing Voxtype clients must set `remote_api_key` to a
+valid consumer key. Do not expose this loopback HTTP service directly online.
+
+## Dashboard password
+
+On first use, open `/accounts` and set a local password (at least 4 characters).
+No username is needed. Account management and its API stay locked until sign-in.
+The dashboard uses an eight-hour, HMAC-authenticated session cookie with HttpOnly,
+SameSite=Strict, and a path restricted to `/accounts`. It runs on HTTP loopback;
+keep it local. Existing origin checks and cross-site request protections remain.
+Five failed password attempts trigger a one-minute cooldown per server process.
+
+Configuration is created automatically at
+`~/.config/codex-dictate/dashboard.json` (or under `$XDG_CONFIG_HOME`). It stores
+a random 256-bit session secret plus a salted PBKDF2-SHA256 password hash
+(600,000 iterations), never the password itself. The file is mode 0600 and writes
+are atomic. The secret persists through restarts; no JWT dependency is needed.
+**Lock dashboard** rotates the secret and invalidates all existing dashboard
+sessions on every port sharing that config. Account credentials remain in the
+OS keyring. The transcription endpoint used by Voxtype requires its own consumer API key
+and works while account management is locked.
+
+Initial setup is available only on the local loopback dashboard. Set the password
+before leaving the server unattended. There is no web password-reset bypass.
+
+## Standalone account dashboard (Linux, experimental)
+
+The dashboard is in English. **Test dictation** records up to 60 seconds after
+you grant browser microphone permission, converts the clip to mono PCM16 WAV at
+16 kHz, and lets you play it back. Clicking **Test transcription** explicitly
+uploads it using the active account. The result shows transcript, HTTP status,
+upstream status on errors, and elapsed time. Recordings stay in page memory and
+are discarded when the page closes; tests do not type into the desktop or save
+audio to disk.
+
+The default credential source is now the OS Secret Service keyring. Codex CLI,
+Codex desktop, and `auth.json` are not needed for this mode. Install `secret-tool`
+(libsecret) and enable/unlock your desktop keyring.
+
+```sh
+go build -o codex-transcribe .
+./codex-transcribe -listen 127.0.0.1:8378
+# Open http://127.0.0.1:8378/accounts (the root redirects here too).
+```
+
+The minimal dashboard lets you add ChatGPT accounts through browser sign-in,
+rename labels, choose the active account, and remove accounts locally. New
+accounts become active; removing the active account selects the next saved one.
+Accounts receive numbered initial labels; rename them for recognition. It displays
+local token-expiry status, not a live entitlement or transcription health check.
+Tokens remain in the keyring and are never returned to the browser.
+
+Login belongs to the local server, so the same pending attempt is visible from
+any browser on this machine. **Copy link** lets you open its authorization URL
+in another browser. If the automatic redirect does not reach the callback,
+paste the entire `http://127.0.0.1:1455/auth/callback?...` address into the
+callback field and click **Complete sign-in**. Pasted URLs are parsed locally,
+never fetched; only the exact loopback callback address and matching state are
+accepted. Manual and automatic callbacks share the same single-use guard.
+The input is cleared after submission and never persisted to browser storage.
+**Cancel** invalidates that attempt and closes its listener so a fresh flow
+can start immediately. Old callbacks cannot complete a newer attempt.
+
+This is an **experimental Codex-compatible OAuth flow using the public Codex
+client ID**, not an independently registered Dictate client. OpenAI may identify
+it as Codex during sign-in. It uses PKCE, validates callback state, and listens
+only on `127.0.0.1:1455` for up to five minutes. Only one login runs at a time.
+A successful sign-in does not prove the internal transcription endpoint accepts
+the new token; verify with actual dictation after login. Official Sign in with
+ChatGPT currently excludes audio and transcription:
+https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
+
+Refresh runs before expiry and is serialized across requests/processes so
+rotating refresh tokens cannot race. A locked keyring or failed renewal stops
+requests; no plaintext credential fallback or implicit account switching is
+used. Keyring storage uses the `application=codex-dictate, session=chatgpt` item.
+The config directory contains only a non-secret coordination lock.
+
+Optional CLI: `codex-transcribe auth login`, `auth status`, and `auth logout`.
+Logout/removal clears **local** credentials only, not the remote OpenAI session.
+An in-flight transcription may still finish with the previously active account.
+Accounts are not automatically pooled or rotated on errors.
+
+Legacy file mode remains explicit: add `-auth-mode codex` to server/doctor
+commands below to use the previous `-auth-file`/`CODEX_HOME` behavior. It relies
+on Codex for renewal. The dashboard displays a legacy-mode warning. A configured
+`CODEX_TRANSCRIBE_API_KEY` is accepted only for consumer transcription; the
+dashboard always uses its own password session. Open the dashboard through the literal IPv4 loopback address.
+
+
 A standalone Go HTTP proxy for ChatGPT dictation, authenticated with your existing Codex ChatGPT login. Upload an audio file; receive a transcript. No desktop integration, microphone capture, local recognition model, or separate OpenAI Platform API key required.
 
 **Unofficial integration:** this calls ChatGPT's private `/backend-api/transcribe` endpoint. It is not endorsed by OpenAI, may break without notice, and does not guarantee account eligibility, subscription coverage, or pricing. Use your own account and comply with the service's terms. Audio is uploaded to OpenAI.

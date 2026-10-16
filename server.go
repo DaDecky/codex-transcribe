@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"mime"
@@ -11,6 +9,8 @@ import (
 )
 
 type proxy struct {
+	managedKeys bool
+	standalone  bool
 	authFile    string
 	apiKey      string
 	maxUpload   int64
@@ -41,6 +41,15 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func (p *proxy) handler() http.Handler {
 	mux := http.NewServeMux()
+	registerDashboard(mux)
+	mux.HandleFunc("/accounts/keys", dashboardGuard(requireDashboardAuth(keyAPI)))
+	mux.HandleFunc("/accounts/transcriptions", dashboardGuard(requireDashboardAuth(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(405)
+			return
+		}
+		p.transcribe(w, r)
+	})))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, struct {
 			Status string `json:"status"`
@@ -56,23 +65,22 @@ func (p *proxy) handler() http.Handler {
 		w.Header().Set("Allow", "GET, HEAD")
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "invalid_request_error", "Use GET for health checks.", "")
 	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" && r.Method == http.MethodGet {
+			http.Redirect(w, r, "/accounts", http.StatusSeeOther)
+			return
+		}
 		writeError(w, http.StatusNotFound, "not_found", "invalid_request_error", "Unknown endpoint.", "")
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		// Health is intentionally public and checks the process, not credentials.
-		if p.apiKey != "" && r.URL.Path != "/healthz" {
-			provided, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-			wantHash := sha256.Sum256([]byte(p.apiKey))
-			gotHash := sha256.Sum256([]byte(provided))
-			if !ok || subtle.ConstantTimeCompare(wantHash[:], gotHash[:]) != 1 {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				writeError(w, http.StatusUnauthorized, "invalid_api_key", "authentication_error", "A valid proxy bearer token is required.", "")
-				return
-			}
+		// Consumer credentials apply only to the public transcription endpoint.
+		// Dashboard routes use their own password session and origin checks.
+		if r.URL.Path == "/v1/audio/transcriptions" && !p.authorizeConsumer(w, r) {
+			return
 		}
+
 		mux.ServeHTTP(w, r)
 	})
 }
