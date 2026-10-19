@@ -1,12 +1,22 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
+	"net/url"
 	"strings"
+	"time"
 )
+
+var activeProxy *proxy
 
 type proxy struct {
 	managedKeys bool
@@ -40,6 +50,7 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func (p *proxy) handler() http.Handler {
+	activeProxy = p
 	mux := http.NewServeMux()
 	registerDashboard(mux)
 	mux.HandleFunc("/accounts/keys", dashboardGuard(requireDashboardAuth(keyAPI)))
@@ -152,13 +163,18 @@ func (p *proxy) transcribe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_language", "invalid_request_error", "Language must be a short language hint, such as en, id, or auto.", "language")
 		return
 	}
-	file, err := files[0].Open()
+	fileHeader := files[0]
+	testFile, err := fileHeader.Open()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "upload_read_failed", "server_error", "Cannot read the uploaded audio.", "file")
 		return
 	}
-	defer file.Close()
-	text, failure := p.recognize(r.Context(), file, files[0], language)
+	testFile.Close()
+
+	openAudio := func() (io.ReadCloser, error) {
+		return fileHeader.Open()
+	}
+	text, failure := p.recognize(r.Context(), openAudio, fileHeader, language)
 	if failure != nil {
 		if retryAfter := failure.retryAfter; retryAfter != "" {
 			w.Header().Set("Retry-After", retryAfter)
@@ -176,4 +192,51 @@ func (p *proxy) transcribe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, struct {
 		Text string `json:"text"`
 	}{text})
+}
+
+func (p *proxy) testConnection(ctx context.Context, acc *account) (bool, int64, string) {
+	start := time.Now()
+	s := acc.Session
+	if s.RefreshToken == "" {
+		errStr := "No refresh token; sign-in needed"
+		_ = updateAccountTestResult(acc.ID, false, 0, errStr)
+		return false, 0, errStr
+	}
+	if s.ExpiresAt <= time.Now().Add(time.Minute).Unix() {
+		next, err := exchangeTokens(ctx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {s.RefreshToken}, "client_id": {dictateClientID}}, s)
+		if err != nil {
+			errStr := fmt.Sprintf("Token renewal failed: %v", err)
+			latency := time.Since(start).Milliseconds()
+			_ = updateAccountTestResult(acc.ID, false, latency, errStr)
+			return false, latency, errStr
+		}
+		_ = updateAccountSession(acc.ID, next)
+		s = next
+		acc.Session = next
+	}
+
+	var auth credentials
+	auth.Tokens.AccessToken = s.AccessToken
+	auth.Tokens.AccountID = s.AccountID
+
+	wavData := minimalTestWAV()
+	header := &multipart.FileHeader{
+		Filename: "test.wav",
+		Size:     int64(len(wavData)),
+		Header:   make(textproto.MIMEHeader),
+	}
+	header.Header.Set("Content-Type", "audio/wav")
+
+	testCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	_, fail := p.recognizeSingle(testCtx, auth, bytes.NewReader(wavData), header, "en")
+	latency := time.Since(start).Milliseconds()
+	if fail != nil {
+		errStr := fail.message
+		_ = updateAccountTestResult(acc.ID, false, latency, errStr)
+		return false, latency, errStr
+	}
+	_ = updateAccountTestResult(acc.ID, true, latency, "")
+	return true, latency, ""
 }

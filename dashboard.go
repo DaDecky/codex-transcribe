@@ -101,6 +101,14 @@ func registerDashboard(mux *http.ServeMux) {
 }
 
 func accountAPI(w http.ResponseWriter, r *http.Request) {
+	p := activeProxy
+	if p == nil {
+		p = &proxy{standalone: true}
+	}
+	p.accountAPI(w, r)
+}
+
+func (p *proxy) accountAPI(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var input struct {
 			Action   string `json:"action"`
@@ -110,6 +118,93 @@ func accountAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		if json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&input) != nil {
 			writeJSON(w, 400, map[string]string{"error": "Invalid request"})
+			return
+		}
+		if input.Action == "test-all" {
+			unlock, err := sessionLock()
+			if err != nil {
+				writeJSON(w, 503, map[string]string{"error": err.Error()})
+				return
+			}
+			a, err := readAccounts()
+			unlock()
+			if err != nil {
+				writeJSON(w, 503, map[string]string{"error": err.Error()})
+				return
+			}
+			type testResult struct {
+				ID        string `json:"id"`
+				Label     string `json:"label"`
+				Valid     bool   `json:"valid"`
+				LatencyMs int64  `json:"latency_ms"`
+				Error     string `json:"error,omitempty"`
+			}
+			results := []testResult{}
+			passed, failed := 0, 0
+			for _, acc := range a.Accounts {
+				accCopy := acc
+				valid, latency, errStr := p.testConnection(r.Context(), &accCopy)
+				if valid {
+					passed++
+				} else {
+					failed++
+				}
+				results = append(results, testResult{
+					ID:        acc.ID,
+					Label:     acc.Label,
+					Valid:     valid,
+					LatencyMs: latency,
+					Error:     errStr,
+				})
+			}
+			writeJSON(w, 200, map[string]any{
+				"ok": true,
+				"summary": map[string]int{
+					"total":  len(a.Accounts),
+					"passed": passed,
+					"failed": failed,
+				},
+				"results": results,
+			})
+			return
+		}
+		if input.Action == "test" {
+			if input.ID == "" {
+				writeJSON(w, 400, map[string]string{"error": "Account ID required"})
+				return
+			}
+			unlock, err := sessionLock()
+			if err != nil {
+				writeJSON(w, 503, map[string]string{"error": err.Error()})
+				return
+			}
+			a, err := readAccounts()
+			unlock()
+			if err != nil {
+				writeJSON(w, 503, map[string]string{"error": err.Error()})
+				return
+			}
+			var target *account
+			for _, acc := range a.Accounts {
+				if acc.ID == input.ID {
+					accCopy := acc
+					target = &accCopy
+					break
+				}
+			}
+			if target == nil {
+				writeJSON(w, 404, map[string]string{"error": "Account not found"})
+				return
+			}
+			valid, latency, errStr := p.testConnection(r.Context(), target)
+			writeJSON(w, 200, map[string]any{
+				"ok":         true,
+				"id":         target.ID,
+				"label":      target.Label,
+				"valid":      valid,
+				"latency_ms": latency,
+				"error":      errStr,
+			})
 			return
 		}
 		if input.Action == "login" {
@@ -146,9 +241,11 @@ func accountAPI(w http.ResponseWriter, r *http.Request) {
 			switch input.Action {
 			case "activate":
 				found := false
-				for _, v := range a.Accounts {
-					if v.ID == input.ID {
-						a.Active = v.ID
+				for i := range a.Accounts {
+					if a.Accounts[i].ID == input.ID {
+						a.Active = a.Accounts[i].ID
+						a.Accounts[i].LastError = ""
+						a.Accounts[i].LastErrorAt = 0
 						found = true
 						break
 					}
@@ -206,21 +303,35 @@ func accountAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type publicAccount struct {
-		ID     string `json:"id"`
-		Label  string `json:"label"`
-		Active bool   `json:"active"`
-		Status string `json:"status"`
+		ID           string `json:"id"`
+		Label        string `json:"label"`
+		Active       bool   `json:"active"`
+		Status       string `json:"status"`
+		LastError    string `json:"last_error,omitempty"`
+		LastErrorAt  int64  `json:"last_error_at,omitempty"`
+		LastTestedAt int64  `json:"last_tested_at,omitempty"`
+		LatencyMs    int64  `json:"latency_ms,omitempty"`
 	}
 	rows := []publicAccount{}
 	for _, v := range a.Accounts {
 		status := "Ready"
-		if v.Session.ExpiresAt <= time.Now().Unix() {
+		if v.LastError != "" {
+			status = "Error"
+		} else if v.Session.RefreshToken == "" {
+			status = "Sign-in needed"
+		} else if v.Session.ExpiresAt <= time.Now().Unix() {
 			status = "Refresh needed"
 		}
-		if v.Session.RefreshToken == "" {
-			status = "Sign-in needed"
-		}
-		rows = append(rows, publicAccount{v.ID, v.Label, v.ID == a.Active, status})
+		rows = append(rows, publicAccount{
+			ID:           v.ID,
+			Label:        v.Label,
+			Active:       v.ID == a.Active,
+			Status:       status,
+			LastError:    v.LastError,
+			LastErrorAt:  v.LastErrorAt,
+			LastTestedAt: v.LastTestedAt,
+			LatencyMs:    v.LatencyMs,
+		})
 	}
 	pending, message, link, loginID := pendingLogin()
 	writeJSON(w, 200, map[string]any{"accounts": rows, "pending": pending, "message": message, "legacy": legacyAuthMode, "login_url": link, "login_id": loginID})

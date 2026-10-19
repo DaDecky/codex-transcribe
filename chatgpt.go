@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
 	"net"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 // Browser-style identity used for requests to the private ChatGPT endpoint.
@@ -63,20 +66,26 @@ func loadCredentials(path string) (credentials, error) {
 	return auth, nil
 }
 
-func (p *proxy) recognize(ctx context.Context, audio io.Reader, header *multipart.FileHeader, language string) (text string, resultFailure *upstreamFailure) {
-	var auth credentials
-	var err error
-	if p.standalone {
-		auth.Tokens.AccessToken, auth.Tokens.AccountID, err = loadAuth()
-	} else {
-		auth, err = loadCredentials(p.authFile)
+func isRetryableUpstream(f *upstreamFailure) bool {
+	if f == nil {
+		return false
 	}
-	if err != nil {
-		if p.standalone {
-			return "", failure(http.StatusServiceUnavailable, "dictate_auth_unavailable", "authentication_error", "Cannot load or renew Dictate credentials. Open /accounts and check your desktop keyring or sign in again.")
-		}
-		return "", failure(http.StatusServiceUnavailable, "codex_auth_unavailable", "authentication_error", "Cannot load ChatGPT credentials. Run codex login and check the configured auth file.")
+	if f.upstreamStatus == http.StatusUnauthorized ||
+		f.upstreamStatus == http.StatusForbidden ||
+		f.upstreamStatus == http.StatusTooManyRequests ||
+		f.upstreamStatus >= 500 {
+		return true
 	}
+	switch f.code {
+	case "codex_auth_rejected", "upstream_forbidden", "upstream_rate_limited",
+		"dictate_auth_unavailable", "upstream_unreachable", "upstream_timeout",
+		"upstream_request_failed", "upstream_response_failed", "invalid_upstream_response":
+		return true
+	}
+	return false
+}
+
+func (p *proxy) recognizeSingle(ctx context.Context, auth credentials, audio io.Reader, header *multipart.FileHeader, language string) (text string, resultFailure *upstreamFailure) {
 	reader, writer := io.Pipe()
 	body := multipart.NewWriter(writer)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.upstreamURL, reader)
@@ -136,6 +145,81 @@ func (p *proxy) recognize(ctx context.Context, audio io.Reader, header *multipar
 		return "", failure(http.StatusBadGateway, "invalid_upstream_response", "server_error", "ChatGPT returned an invalid transcription response.")
 	}
 	return *result.Text, nil
+}
+
+func (p *proxy) recognize(ctx context.Context, openAudio func() (io.ReadCloser, error), header *multipart.FileHeader, language string) (text string, resultFailure *upstreamFailure) {
+	if !p.standalone {
+		auth, err := loadCredentials(p.authFile)
+		if err != nil {
+			return "", failure(http.StatusServiceUnavailable, "codex_auth_unavailable", "authentication_error", "Cannot load ChatGPT credentials. Run codex login and check the configured auth file.")
+		}
+		audio, err := openAudio()
+		if err != nil {
+			return "", failure(http.StatusInternalServerError, "upload_read_failed", "server_error", "Cannot read the uploaded audio.")
+		}
+		defer audio.Close()
+		return p.recognizeSingle(ctx, auth, audio, header, language)
+	}
+
+	candidates, err := readCandidates()
+	if err != nil {
+		return "", failure(http.StatusServiceUnavailable, "dictate_auth_unavailable", "authentication_error", "Cannot load or renew Dictate credentials. Open /accounts and check your desktop keyring or sign in again.")
+	}
+
+	var lastFailure *upstreamFailure
+	for i, acc := range candidates {
+		if ctx.Err() != nil {
+			return "", failure(http.StatusGatewayTimeout, "upstream_timeout", "server_error", "ChatGPT transcription timed out.")
+		}
+		s := acc.Session
+		if s.ExpiresAt <= time.Now().Add(time.Minute).Unix() {
+			if s.RefreshToken == "" {
+				_ = markAccountError(acc.ID, "ChatGPT session cannot renew; sign-in needed")
+				lastFailure = failure(http.StatusBadGateway, "codex_auth_rejected", "authentication_error", "ChatGPT rejected this account session. Sign in again from the accounts dashboard.")
+				continue
+			}
+			next, err := exchangeTokens(ctx, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {s.RefreshToken}, "client_id": {dictateClientID}}, s)
+			if err != nil {
+				_ = markAccountError(acc.ID, fmt.Sprintf("Token renewal failed: %v", err))
+				lastFailure = failure(http.StatusBadGateway, "codex_auth_rejected", "authentication_error", "ChatGPT rejected this account session. Sign in again from the accounts dashboard.")
+				continue
+			}
+			_ = updateAccountSession(acc.ID, next)
+			s = next
+		}
+
+		var auth credentials
+		auth.Tokens.AccessToken = s.AccessToken
+		auth.Tokens.AccountID = s.AccountID
+
+		audio, err := openAudio()
+		if err != nil {
+			return "", failure(http.StatusInternalServerError, "upload_read_failed", "server_error", "Cannot read the uploaded audio.")
+		}
+
+		txt, fail := p.recognizeSingle(ctx, auth, audio, header, language)
+		_ = audio.Close()
+
+		if fail == nil {
+			if acc.LastError != "" {
+				_ = clearAccountError(acc.ID)
+			}
+			_ = setActiveAccount(acc.ID)
+			return txt, nil
+		}
+
+		lastFailure = fail
+		_ = markAccountError(acc.ID, fail.message)
+
+		if i == len(candidates)-1 || !isRetryableUpstream(fail) {
+			break
+		}
+	}
+
+	if lastFailure != nil {
+		return "", lastFailure
+	}
+	return "", failure(http.StatusServiceUnavailable, "dictate_auth_unavailable", "authentication_error", "No available accounts for transcription.")
 }
 
 func writeAudioMultipart(body *multipart.Writer, audio io.Reader, header *multipart.FileHeader, language string) error {

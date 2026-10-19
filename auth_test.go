@@ -237,3 +237,164 @@ func TestDashboardAllowsLocalRecordedAudioPlayback(t *testing.T) {
 		t.Fatal("unrelated protections lost")
 	}
 }
+
+func TestMultiAccountFallbackOnUpstreamError(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	store := fakeAccounts(t, accountStore{Active: "first", Accounts: []account{
+		{ID: "first", Session: session{AccessToken: "first-token", AccountID: "first-acc", ExpiresAt: time.Now().Add(time.Hour).Unix()}},
+		{ID: "second", Session: session{AccessToken: "second-token", AccountID: "second-acc", ExpiresAt: time.Now().Add(time.Hour).Unix()}},
+	}})
+	p := testProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		token := r.Header.Get("Authorization")
+		if token == "Bearer first-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"unauthorized"}`))
+			return
+		}
+		if token == "Bearer second-token" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"text":"transcribed-by-second"}`))
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+	})
+	p.standalone = true
+	response := serve(p, uploadRequest(t, nil, []byte("audio")))
+	if response.Code != 200 {
+		t.Fatalf("status %d: %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "transcribed-by-second") {
+		t.Fatalf("did not return transcript from second account: %s", response.Body.String())
+	}
+	// Active account should switch to second
+	if store.Active != "second" {
+		t.Fatalf("expected active account to switch to second, got %s", store.Active)
+	}
+	// First account should have LastError populated
+	var firstAcc *account
+	for i := range store.Accounts {
+		if store.Accounts[i].ID == "first" {
+			firstAcc = &store.Accounts[i]
+		}
+	}
+	if firstAcc == nil || firstAcc.LastError == "" {
+		t.Fatalf("expected first account to have LastError persisted")
+	}
+}
+
+func TestMultiAccountSkipsPreviouslyFailedAccount(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	_ = fakeAccounts(t, accountStore{Active: "first", Accounts: []account{
+		{ID: "first", LastError: "rejected earlier", LastErrorAt: time.Now().Unix(), Session: session{AccessToken: "first-token", ExpiresAt: time.Now().Add(time.Hour).Unix()}},
+		{ID: "second", Session: session{AccessToken: "second-token", ExpiresAt: time.Now().Add(time.Hour).Unix()}},
+	}})
+	firstCalled := false
+	p := testProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer first-token" {
+			firstCalled = true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"text":"hello"}`))
+	})
+	p.standalone = true
+	response := serve(p, uploadRequest(t, nil, []byte("audio")))
+	if response.Code != 200 {
+		t.Fatalf("status %d: %s", response.Code, response.Body.String())
+	}
+	if firstCalled {
+		t.Fatal("healthy account was available but failed account was called first")
+	}
+}
+
+func TestReconnectOrActivateClearsError(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	store := fakeAccounts(t, accountStore{Active: "second", Accounts: []account{
+		{ID: "first", LastError: "error", LastErrorAt: 12345, Session: session{AccountID: "my-acc", AccessToken: "old", RefreshToken: "ref", ExpiresAt: time.Now().Add(time.Hour).Unix()}},
+		{ID: "second", Session: session{AccessToken: "second", ExpiresAt: time.Now().Add(time.Hour).Unix()}},
+	}})
+	// Test addAccount reconnecting same AccountID
+	err := addAccount(session{AccountID: "my-acc", AccessToken: "new", RefreshToken: "ref", ExpiresAt: time.Now().Add(time.Hour).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Accounts[0].LastError != "" || store.Accounts[0].LastErrorAt != 0 {
+		t.Fatal("reconnecting account did not clear error")
+	}
+	if store.Active != "first" {
+		t.Fatal("reconnected account did not become active")
+	}
+
+	// Set error again and test "activate" action
+	store.Accounts[0].LastError = "another error"
+	store.Accounts[0].LastErrorAt = 54321
+	store.Active = "second"
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/accounts/api", strings.NewReader(`{"action":"activate","id":"first"}`))
+	accountAPI(w, r)
+	if w.Code != 200 {
+		t.Fatalf("activate failed: %s", w.Body.String())
+	}
+	if store.Accounts[0].LastError != "" {
+		t.Fatal("activating account did not clear error")
+	}
+	if store.Active != "first" {
+		t.Fatal("expected first account to be active")
+	}
+}
+
+func TestAccountConnectionTestAPI(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	store := fakeAccounts(t, accountStore{Active: "one", Accounts: []account{
+		{ID: "one", Label: "Good Account", Session: session{AccessToken: "good-token", RefreshToken: "ref", ExpiresAt: time.Now().Add(time.Hour).Unix()}},
+		{ID: "two", Label: "Bad Account", Session: session{AccessToken: "bad-token", RefreshToken: "ref", ExpiresAt: time.Now().Add(time.Hour).Unix()}},
+	}})
+	p := testProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer good-token" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"text":""}`))
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"unauthorized"}`))
+	})
+	p.standalone = true
+	activeProxy = p
+
+	// Test single test
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/accounts/api", strings.NewReader(`{"action":"test","id":"one"}`))
+	p.accountAPI(w, r)
+	if w.Code != 200 {
+		t.Fatalf("test failed: %s", w.Body.String())
+	}
+	var testRes struct {
+		Valid     bool  `json:"valid"`
+		LatencyMs int64 `json:"latency_ms"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &testRes)
+	if !testRes.Valid {
+		t.Fatalf("expected account one to be valid")
+	}
+
+	// Test test-all
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest("POST", "/accounts/api", strings.NewReader(`{"action":"test-all"}`))
+	p.accountAPI(w, r)
+	if w.Code != 200 {
+		t.Fatalf("test-all failed: %s", w.Body.String())
+	}
+	var allRes struct {
+		Summary struct {
+			Total  int `json:"total"`
+			Passed int `json:"passed"`
+			Failed int `json:"failed"`
+		} `json:"summary"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &allRes)
+	if allRes.Summary.Total != 2 || allRes.Summary.Passed != 1 || allRes.Summary.Failed != 1 {
+		t.Fatalf("unexpected summary: %+v", allRes.Summary)
+	}
+	if store.Accounts[1].LastError == "" {
+		t.Fatal("expected bad account to have LastError set")
+	}
+}

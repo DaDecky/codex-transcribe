@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,9 +69,13 @@ func keyring(action string, input []byte) ([]byte, error) {
 }
 
 type account struct {
-	ID      string  `json:"id"`
-	Label   string  `json:"label"`
-	Session session `json:"session"`
+	ID           string  `json:"id"`
+	Label        string  `json:"label"`
+	Session      session `json:"session"`
+	LastError    string  `json:"last_error,omitempty"`
+	LastErrorAt  int64   `json:"last_error_at,omitempty"`
+	LastTestedAt int64   `json:"last_tested_at,omitempty"`
+	LatencyMs    int64   `json:"latency_ms,omitempty"`
 }
 type accountStore struct {
 	Active   string    `json:"active"`
@@ -134,6 +139,173 @@ var writeSession = func(s session) error {
 	return errors.New("active account no longer exists")
 }
 
+var readCandidates = func() ([]account, error) {
+	unlock, err := sessionLock()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	a, err := readAccounts()
+	if err != nil {
+		return nil, err
+	}
+	if len(a.Accounts) == 0 {
+		return nil, errors.New("no active Dictate account; open /accounts to sign in")
+	}
+
+	var healthy []account
+	var failed []account
+	var activeAcc *account
+
+	for i := range a.Accounts {
+		if a.Accounts[i].ID == a.Active {
+			activeAcc = &a.Accounts[i]
+		}
+	}
+
+	for _, acc := range a.Accounts {
+		if acc.LastError != "" {
+			failed = append(failed, acc)
+		} else if activeAcc == nil || acc.ID != activeAcc.ID {
+			healthy = append(healthy, acc)
+		}
+	}
+
+	var candidates []account
+	if activeAcc != nil && activeAcc.LastError == "" {
+		candidates = append(candidates, *activeAcc)
+	}
+	candidates = append(candidates, healthy...)
+	candidates = append(candidates, failed...)
+	return candidates, nil
+}
+
+func markAccountError(id, errMsg string) error {
+	unlock, err := sessionLock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	a, err := readAccounts()
+	if err != nil {
+		return err
+	}
+	for i := range a.Accounts {
+		if a.Accounts[i].ID == id {
+			a.Accounts[i].LastError = errMsg
+			a.Accounts[i].LastErrorAt = time.Now().Unix()
+			return saveAccounts(a)
+		}
+	}
+	return nil
+}
+
+func clearAccountError(id string) error {
+	unlock, err := sessionLock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	a, err := readAccounts()
+	if err != nil {
+		return err
+	}
+	for i := range a.Accounts {
+		if a.Accounts[i].ID == id {
+			a.Accounts[i].LastError = ""
+			a.Accounts[i].LastErrorAt = 0
+			return saveAccounts(a)
+		}
+	}
+	return nil
+}
+
+func setActiveAccount(id string) error {
+	unlock, err := sessionLock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	a, err := readAccounts()
+	if err != nil {
+		return err
+	}
+	for _, v := range a.Accounts {
+		if v.ID == id {
+			a.Active = id
+			return saveAccounts(a)
+		}
+	}
+	return errors.New("Account not found")
+}
+
+func updateAccountSession(id string, s session) error {
+	unlock, err := sessionLock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	a, err := readAccounts()
+	if err != nil {
+		return err
+	}
+	for i := range a.Accounts {
+		if a.Accounts[i].ID == id {
+			a.Accounts[i].Session = s
+			return saveAccounts(a)
+		}
+	}
+	return errors.New("Account not found")
+}
+
+func updateAccountTestResult(id string, valid bool, latencyMs int64, errMsg string) error {
+	unlock, err := sessionLock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	a, err := readAccounts()
+	if err != nil {
+		return err
+	}
+	for i := range a.Accounts {
+		if a.Accounts[i].ID == id {
+			a.Accounts[i].LastTestedAt = time.Now().Unix()
+			a.Accounts[i].LatencyMs = latencyMs
+			if valid {
+				a.Accounts[i].LastError = ""
+				a.Accounts[i].LastErrorAt = 0
+			} else {
+				a.Accounts[i].LastError = errMsg
+				a.Accounts[i].LastErrorAt = time.Now().Unix()
+			}
+			return saveAccounts(a)
+		}
+	}
+	return nil
+}
+
+func minimalTestWAV() []byte {
+	const sampleRate = 16000
+	const numSamples = 1600
+	const dataSize = numSamples * 2
+	buf := make([]byte, 44+dataSize)
+	copy(buf[0:4], "RIFF")
+	binary.LittleEndian.PutUint32(buf[4:8], uint32(36+dataSize))
+	copy(buf[8:12], "WAVE")
+	copy(buf[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(buf[16:20], 16)
+	binary.LittleEndian.PutUint16(buf[20:22], 1)
+	binary.LittleEndian.PutUint16(buf[22:24], 1)
+	binary.LittleEndian.PutUint32(buf[24:28], sampleRate)
+	binary.LittleEndian.PutUint32(buf[28:32], sampleRate*2)
+	binary.LittleEndian.PutUint16(buf[32:34], 2)
+	binary.LittleEndian.PutUint16(buf[34:36], 16)
+	copy(buf[36:40], "data")
+	binary.LittleEndian.PutUint32(buf[40:44], uint32(dataSize))
+	return buf
+}
+
 func addAccount(s session) error {
 	a, err := readAccounts()
 	if err != nil {
@@ -143,6 +315,8 @@ func addAccount(s session) error {
 	for i := range a.Accounts {
 		if s.AccountID != "" && a.Accounts[i].Session.AccountID == s.AccountID {
 			a.Accounts[i].Session = s
+			a.Accounts[i].LastError = ""
+			a.Accounts[i].LastErrorAt = 0
 			a.Active = a.Accounts[i].ID
 			return saveAccounts(a)
 		}
