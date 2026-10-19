@@ -120,7 +120,15 @@ func TestDashboardBlocksCrossOriginAndRebinding(t *testing.T) {
 	for _, test := range []struct {
 		host, origin, header string
 		want                 int
-	}{{"127.0.0.1:8377", "http://evil.example", "1", 403}, {"evil.example:8377", "", "1", 403}, {"127.0.0.1:8377", "", "", 403}, {"127.0.0.1:8377", "http://127.0.0.1:8377", "1", 204}} {
+	}{
+		{"127.0.0.1:8377", "http://evil.example", "1", 403},
+		{"evil.example:8377", "", "1", 403},
+		{"127.0.0.1:8377", "", "", 403},
+		{"127.0.0.1:8377", "http://127.0.0.1:8377", "1", 204},
+		{"localhost:8377", "http://localhost:8377", "1", 204},
+		{"localhost:8377", "", "", 403},
+		{"localhost:8377", "http://evil.example", "1", 403},
+	} {
 		r := httptest.NewRequest("POST", "http://"+test.host+"/accounts/api", nil)
 		r.RemoteAddr = "127.0.0.1:50000"
 		r.Header.Set("Origin", test.origin)

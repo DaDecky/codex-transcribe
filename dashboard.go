@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -34,6 +35,18 @@ func removeAccount(a accountStore, id string) error {
 	return saveAccounts(a)
 }
 
+func isLoopbackHost(rawHost string) bool {
+	host := rawHost
+	if h, _, err := net.SplitHostPort(rawHost); err == nil {
+		host = h
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // Restrict browser access to loopback or the explicitly configured HTTPS origin.
 // Mutations require a custom header; cross-origin preflights are rejected.
 func dashboardGuard(next http.HandlerFunc) http.HandlerFunc {
@@ -53,10 +66,14 @@ func dashboardGuard(next http.HandlerFunc) http.HandlerFunc {
 				http.Error(w, "Invalid dashboard host", http.StatusForbidden)
 				return
 			}
+			origin := r.Header.Get("Origin")
+			if (origin != "" && origin != expectedOrigin) || (r.Method != http.MethodGet && origin == "") {
+				http.Error(w, "Invalid origin", http.StatusForbidden)
+				return
+			}
 		} else {
-			host, _, err := net.SplitHostPort(r.Host)
-			if err != nil || host != "127.0.0.1" {
-				http.Error(w, "Open dashboard through http://127.0.0.1:<port>/accounts", http.StatusForbidden)
+			if !isLoopbackHost(r.Host) {
+				http.Error(w, "Open dashboard through http://127.0.0.1:<port>/accounts or http://localhost:<port>/accounts", http.StatusForbidden)
 				return
 			}
 			remote, _, err := net.SplitHostPort(r.RemoteAddr)
@@ -64,12 +81,13 @@ func dashboardGuard(next http.HandlerFunc) http.HandlerFunc {
 				http.Error(w, "Local access only", http.StatusForbidden)
 				return
 			}
-			expectedOrigin = "http://" + r.Host
-		}
-		origin := r.Header.Get("Origin")
-		if (origin != "" && origin != expectedOrigin) || (public && r.Method != http.MethodGet && origin == "") {
-			http.Error(w, "Invalid origin", http.StatusForbidden)
-			return
+			if origin := r.Header.Get("Origin"); origin != "" {
+				originURL, err := url.Parse(origin)
+				if err != nil || originURL.Scheme != "http" || !isLoopbackHost(originURL.Host) {
+					http.Error(w, "Invalid origin", http.StatusForbidden)
+					return
+				}
+			}
 		}
 		if site := r.Header.Get("Sec-Fetch-Site"); site == "cross-site" {
 			http.Error(w, "Cross-site access blocked", http.StatusForbidden)
@@ -79,7 +97,7 @@ func dashboardGuard(next http.HandlerFunc) http.HandlerFunc {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
-		if r.Method != http.MethodGet && r.Header.Get("X-Dictate-Request") != "1" {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("X-Dictate-Request") != "1" {
 			http.Error(w, "Missing request header", http.StatusForbidden)
 			return
 		}
