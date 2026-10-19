@@ -39,7 +39,11 @@ func validateListen(addr, apiKey string) error {
 		return fmt.Errorf("invalid listen address: %w", err)
 	}
 	ip := net.ParseIP(host)
-	if apiKey == "" && (ip == nil || !ip.IsLoopback()) {
+	origin, err := publicOrigin()
+	if err != nil {
+		return err
+	}
+	if apiKey == "" && origin == "" && (ip == nil || !ip.IsLoopback()) {
 		return errors.New("non-loopback listeners require CODEX_TRANSCRIBE_API_KEY; use a literal loopback IP for unauthenticated local access")
 	}
 	return nil
@@ -78,6 +82,9 @@ func runCLI(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stdout, "codex-transcribe %s\n", version)
 		return nil
 	}
+	if store := os.Getenv("CODEX_DICTATE_CREDENTIAL_STORE"); store != "" && store != "keyring" && store != "file" {
+		return errors.New("CODEX_DICTATE_CREDENTIAL_STORE must be keyring or file")
+	}
 	explicitAuth := false
 	flags.Visit(func(f *flag.Flag) {
 		if f.Name == "auth-file" {
@@ -115,10 +122,13 @@ func runCLI(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return errors.New("cannot initialize dashboard configuration")
 	}
-	_, err = readDashboardConfig()
+	c, err := readDashboardConfig()
+	if err == nil {
+		err = initializeDashboardPassword(c)
+	}
 	unlock()
 	if err != nil {
-		return errors.New("cannot initialize dashboard configuration")
+		return fmt.Errorf("cannot initialize dashboard configuration: %w", err)
 	}
 	client := &http.Client{
 		Timeout: *timeout,

@@ -1,0 +1,78 @@
+name: codex-dictate
+
+services:
+  app:
+    image: ${DICTATE_IMAGE:-codex-transcribe:production}
+    build:
+      context: .
+      args:
+        VERSION: ${DICTATE_VERSION:-dev}
+    command: ["-listen", "0.0.0.0:8378"]
+    environment:
+      XDG_CONFIG_HOME: /data/config
+      CODEX_DICTATE_CREDENTIAL_STORE: file
+      CODEX_DICTATE_PUBLIC_URL: https://${DICTATE_DOMAIN:?Set DICTATE_DOMAIN in .env.production}
+      CODEX_DICTATE_DASHBOARD_PASSWORD_FILE: /run/secrets/dashboard_password
+    secrets:
+      - dashboard_password
+    volumes:
+      - dictate-data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8378/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
+    environment:
+      DICTATE_DOMAIN: ${DICTATE_DOMAIN:?Set DICTATE_DOMAIN in .env.production}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+secrets:
+  dashboard_password:
+    file: ./secrets/dashboard_password
+
+volumes:
+  dictate-data:
+  caddy-data:
+  caddy-config:

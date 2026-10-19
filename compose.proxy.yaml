@@ -1,0 +1,8 @@
+# Optional override for an existing reverse proxy on the Docker host.
+# Use together with compose.prod.yaml; the bundled Caddy service stays disabled.
+services:
+  app:
+    ports:
+      - "127.0.0.1:${DICTATE_PORT:-8378}:8378"
+  caddy:
+    profiles: [bundled-proxy]

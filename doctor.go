@@ -55,7 +55,7 @@ func runDoctor(authFile, listen, apiKey string, output io.Writer) error {
 
 // Keyring diagnostics deliberately do not refresh or expose credentials.
 func runKeyringDoctor(listen, apiKey string, output io.Writer) error {
-	fmt.Fprintln(output, "Offline doctor: keyring session presence only; no upstream requests.")
+	fmt.Fprintln(output, "Offline doctor: credential session presence only; no upstream requests.")
 	unlock, err := sessionLock()
 	if err != nil {
 		return err
@@ -66,7 +66,7 @@ func runKeyringDoctor(listen, apiKey string, output io.Writer) error {
 		fmt.Fprintln(output, "FAIL auth: no accessible active account; open /accounts and sign in.")
 		return errors.New("doctor found failing checks")
 	}
-	fmt.Fprintln(output, "PASS auth: active keyring session present. Login validity is not checked offline.")
+	fmt.Fprintln(output, "PASS auth: active session present. Login validity is not checked offline.")
 	if err = validateListen(listen, apiKey); err != nil {
 		return err
 	}

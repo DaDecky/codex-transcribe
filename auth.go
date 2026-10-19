@@ -42,6 +42,9 @@ type session struct {
 // No credential values appear in argv, errors or logs. secret-tool delegates
 // persistence and at-rest protection to the desktop Secret Service.
 func keyring(action string, input []byte) ([]byte, error) {
+	if os.Getenv("CODEX_DICTATE_CREDENTIAL_STORE") == "file" {
+		return fileCredentials(action, input)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	args := []string{action}
@@ -399,9 +402,6 @@ func beginLogin() (string, <-chan error, error) {
 	if loginPending {
 		return "", nil, errors.New("A sign-in is pending. Copy its link or cancel it from the dashboard.")
 	}
-	if _, err := exec.LookPath("secret-tool"); err != nil {
-		return "", nil, errors.New("secret-tool and a desktop keyring are required")
-	}
 	if _, err := keyringProbe(); err != nil {
 		return "", nil, err
 	}
@@ -501,6 +501,20 @@ func login() error {
 }
 
 func keyringProbe() ([]byte, error) {
+	if os.Getenv("CODEX_DICTATE_CREDENTIAL_STORE") == "file" {
+		path, err := credentialFilePath()
+		if err != nil {
+			return nil, err
+		}
+		f, err := os.CreateTemp(filepath.Dir(path), ".credential-probe-*")
+		if err != nil {
+			return nil, errors.New("credential directory is not writable")
+		}
+		name := f.Name()
+		closeErr := f.Close()
+		removeErr := os.Remove(name)
+		return nil, errors.Join(closeErr, removeErr)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "secret-tool", "store", "--label=Codex Dictate keyring check", "application", "codex-dictate", "session", "probe")

@@ -1,5 +1,23 @@
 # codex-transcribe
 
+For a VPS deployment with a domain, automatic HTTPS, and a private backend, use
+the [production Compose guide](docs/production.md).
+
+## Install with Docker Compose (Linux)
+
+```sh
+git clone https://github.com/DaDecky/codex-transcribe.git
+cd codex-transcribe
+docker compose up -d --build
+```
+
+Open http://127.0.0.1:8378/accounts, set a dashboard password, sign in to
+ChatGPT, and create a consumer API key. Compose builds `codex-transcribe:local`
+and persists accounts/configuration in a named volume. No desktop keyring or
+`auth.json` is required. Container account tokens are stored unencrypted in an
+owner-only credential file. See [Docker installation](docs/docker.md) for port
+configuration, persistence, remote-host access, and upgrades.
+
 ## Consumer API keys
 
 In the unlocked dashboard, use **API keys → Create key**, naming the consumer.
@@ -260,11 +278,14 @@ Returns `{"status":"ok"}`. This is a public process-liveness endpoint, **not** a
 
 | Setting | Default / behavior |
 | --- | --- |
-| `-listen` | `127.0.0.1:8378`. A non-loopback listener requires a proxy API key. |
+| `-listen` | `127.0.0.1:8378`. A non-loopback listener requires a proxy API key or an explicitly configured HTTPS public URL. |
+| `CODEX_DICTATE_PUBLIC_URL` | Optional public HTTPS origin behind a reverse proxy, e.g. `https://dictate.example.com`. Enables exact public host/origin checks and Secure dashboard cookies. Keep the backend private. |
+| `CODEX_DICTATE_DASHBOARD_PASSWORD_FILE` | Bootstrap password file, required on first startup with a public URL. Initializes only a missing password; the hash is persisted. |
+| `CODEX_DICTATE_CREDENTIAL_STORE` | `keyring` by default. Explicit `file` mode stores standalone account tokens in a protected, unencrypted file under `$XDG_CONFIG_HOME/codex-dictate`. |
 | `-auth-file` | Explicit flag overrides `CODEX_TRANSCRIBE_AUTH_FILE`, then `$CODEX_HOME/auth.json`, then `$HOME/.codex/auth.json`. |
 | `-timeout` | `90s`, greater than zero and at most one hour. Bounds the upstream request. |
 | `-max-upload-mib` | `25`, between 1 and 1024 MiB. Bounds the complete multipart request body. |
-| `CODEX_TRANSCRIBE_API_KEY` | Unset for local, unauthenticated access. When set, every endpoint except `/healthz` requires `Authorization: Bearer <key>`. |
+| `CODEX_TRANSCRIBE_API_KEY` | Optional additional consumer Bearer key. Dashboard-managed keys always work; the consumer endpoint requires a key. Dashboard access uses its own password session. |
 | `CODEX_TRANSCRIBE_USER_AGENT` | Browser-style default. Override if ChatGPT's private endpoint requires an updated identity. |
 
 Authentication is re-read for each request, so Codex token rotation is picked up without restarting the proxy. **Codex owns login and token refresh**; this proxy does not perform OAuth or write your credentials. If the upstream rejects the token, use Codex to refresh your login and try again. It does not read Codex provider configuration or redirect to a custom chat backend.

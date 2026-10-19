@@ -143,7 +143,7 @@ func setDashboardCookie(w http.ResponseWriter, c dashboardConfig) error {
 	if err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{Name: dashboardCookie, Value: signedSession(c, time.Now().Add(8*time.Hour).Unix(), nonce), Path: "/accounts", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 8 * 60 * 60})
+	http.SetCookie(w, &http.Cookie{Name: dashboardCookie, Value: signedSession(c, time.Now().Add(8*time.Hour).Unix(), nonce), Path: "/accounts", HttpOnly: true, Secure: secureDashboardCookie(), SameSite: http.SameSiteStrictMode, MaxAge: 8 * 60 * 60})
 	return nil
 }
 func requireDashboardAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -207,6 +207,10 @@ func dashboardAuthAPI(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "Invalid request"})
 		return
 	}
+	if input.Action == "setup" && secureDashboardCookie() {
+		writeJSON(w, 403, map[string]string{"error": "Public dashboard setup requires the server bootstrap password file"})
+		return
+	}
 	passwordLimit.Lock()
 	defer passwordLimit.Unlock()
 	if time.Now().Before(passwordLimit.until) {
@@ -239,7 +243,7 @@ func dashboardAuthAPI(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 503, map[string]string{"error": "Could not lock dashboard"})
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: dashboardCookie, Path: "/accounts", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+		http.SetCookie(w, &http.Cookie{Name: dashboardCookie, Path: "/accounts", MaxAge: -1, HttpOnly: true, Secure: secureDashboardCookie(), SameSite: http.SameSiteStrictMode})
 		writeJSON(w, 200, map[string]bool{"ok": true})
 		return
 	}

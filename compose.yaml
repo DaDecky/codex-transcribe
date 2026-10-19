@@ -1,0 +1,36 @@
+services:
+  codex-transcribe:
+    image: codex-transcribe:local
+    build:
+      context: .
+      args:
+        VERSION: ${DICTATE_VERSION:-dev}
+    # Linux host networking preserves localhost-only dashboard and OAuth callback.
+    network_mode: host
+    command: ["-listen", "127.0.0.1:${DICTATE_PORT:-8378}"]
+    environment:
+      XDG_CONFIG_HOME: /data/config
+      CODEX_DICTATE_CREDENTIAL_STORE: file
+    volumes:
+      - dictate-data:/data
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:${DICTATE_PORT:-8378}/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  dictate-data:

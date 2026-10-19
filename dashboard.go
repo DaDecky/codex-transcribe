@@ -34,25 +34,40 @@ func removeAccount(a accountStore, id string) error {
 	return saveAccounts(a)
 }
 
-// Restrict browser access to the actual loopback origin. Mutations require a
-// custom header, which foreign origins cannot send without a rejected preflight.
+// Restrict browser access to loopback or the explicitly configured HTTPS origin.
+// Mutations require a custom header; cross-origin preflights are rejected.
 func dashboardGuard(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; media-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
-		host, _, err := net.SplitHostPort(r.Host)
-		if err != nil || host != "127.0.0.1" {
-			http.Error(w, "Open dashboard through http://127.0.0.1:<port>/accounts", http.StatusForbidden)
+		expectedOrigin, err := publicOrigin()
+		if err != nil {
+			http.Error(w, "Invalid public URL configuration", http.StatusForbidden)
 			return
 		}
-		remote, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil || net.ParseIP(remote) == nil || !net.ParseIP(remote).IsLoopback() {
-			http.Error(w, "Local access only", http.StatusForbidden)
-			return
+		public := expectedOrigin != ""
+		if public {
+			if "https://"+r.Host != expectedOrigin {
+				http.Error(w, "Invalid dashboard host", http.StatusForbidden)
+				return
+			}
+		} else {
+			host, _, err := net.SplitHostPort(r.Host)
+			if err != nil || host != "127.0.0.1" {
+				http.Error(w, "Open dashboard through http://127.0.0.1:<port>/accounts", http.StatusForbidden)
+				return
+			}
+			remote, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil || net.ParseIP(remote) == nil || !net.ParseIP(remote).IsLoopback() {
+				http.Error(w, "Local access only", http.StatusForbidden)
+				return
+			}
+			expectedOrigin = "http://" + r.Host
 		}
-		if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+r.Host {
+		origin := r.Header.Get("Origin")
+		if (origin != "" && origin != expectedOrigin) || (public && r.Method != http.MethodGet && origin == "") {
 			http.Error(w, "Invalid origin", http.StatusForbidden)
 			return
 		}
